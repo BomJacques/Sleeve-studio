@@ -120,7 +120,30 @@ canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,
  if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else{const s=state.photoStyle,g=geometry(img,s,rect.width,rect.height);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
-document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('shortcuts').onclick=()=>$('help').showModal();
+document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
+function openHelp(showShortcuts = false) {
+  const dialog = $('help');
+  const shortcuts = $('help-keys');
+  shortcuts.open = showShortcuts;
+  dialog.showModal();
+  const body = dialog.querySelector('.help-body');
+  body.scrollTop = 0;
+  if (showShortcuts) {
+    shortcuts.querySelector('summary').focus();
+    body.scrollTop = body.scrollHeight;
+  }
+}
+$('openhelp').onclick = () => openHelp();
+$('shortcuts').onclick = () => openHelp(true);
+$('help').addEventListener('click', event => {
+  if (event.target !== event.currentTarget) return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  if (event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom) {
+    event.currentTarget.close();
+  }
+});
+
 let preparedUrl,exportBusy=false;
 function previewTargets(img){const wrapper=$('targets');wrapper.innerHTML='';for(const [id,t] of Object.entries(targets)){const label=document.createElement('label');label.className='choice';label.innerHTML='<input type="checkbox" value="'+id+'" '+(state.outputs.includes(id)?'checked':'')+'><canvas class="export-preview"></canvas><span><b>'+t.name+'</b><small>'+t.kind+'</small></span><span class="exportdims">'+t.w+' × '+t.h+'</span>';wrapper.append(label);paint(label.querySelector('canvas'),img,t,100,Math.round(100*t.h/t.w));label.querySelector('input').onchange=e=>{state.outputs=e.target.checked?[...new Set([...state.outputs,id])]:state.outputs.filter(k=>k!==id);clearDownload();exportSummary(img);saveSoon()}}}
 function clearDownload(){if(preparedUrl){URL.revokeObjectURL(preparedUrl);preparedUrl=null}$('downloadlink').hidden=true}
@@ -143,7 +166,7 @@ $('download').onclick=async()=>{if(exportBusy||!state.outputs.length)return;expo
  try{await preloadText();const files=[],base=state.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g,'-').trim().slice(0,70)||'Artwork';for(const [i,id] of state.outputs.entries()){const t=targets[id];$('exportcount').textContent='Rendering '+(i+1)+' of '+state.outputs.length+'…';await new Promise(r=>setTimeout(r,20));const c=document.createElement('canvas');paint(c,img,t,t.w,t.h);let quality=.95,blob=await asBlob(c,'image/'+(t.ext==='jpg'?'jpeg':'png'),quality);
  while(t.limit&&blob.size>t.limit&&quality>.35){quality-=.1;blob=await asBlob(c,'image/jpeg',quality)}c.width=c.height=1;if(t.limit&&blob.size>t.limit)throw new Error('The banner exceeds the platform size limit. Try a simpler image.');files.push({blob,name:base+'-'+id+'-'+t.w+'x'+t.h+'.'+t.ext})}
  const single=files.length===1,blob=single?files[0].blob:await makeZip(files),a=$('downloadlink');preparedUrl=URL.createObjectURL(blob);a.href=preparedUrl;a.download=single?files[0].name:base+'-artwork.zip';a.hidden=false;a.textContent='Save '+a.download;a.click();$('exportcount').textContent='Export ready'}catch(e){$('exportcount').textContent=e.message||'Export failed. Please try again.'}finally{exportBusy=false;dlg.querySelectorAll('button,input').forEach(el=>el.disabled=false)}};
-document.addEventListener('keydown',e=>{if($('exportdlg').open||$('help').open)return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')$('help').showModal();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
+document.addEventListener('keydown',e=>{if($('exportdlg').open||$('help').open)return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
 async function start(){for(const [id,name] of Object.entries(builtins))media.set(id,{name,src:artworkSources[id]});
  try{db=await openDB();const [uploads,custom,project]=await Promise.all([dbGet('media'),dbGet('fonts'),dbGet('project')]);for(const [id,m] of uploads||[])media.set(id,m);for(const [name,src] of custom||[])await addFace(name,src);if(project&&media.has(project.photo)&&targets[project.format])state=project;$('savestatus').textContent='Saved on this device'}catch{$('savestatus').textContent='Session workspace'}
  ready=true;sync();saveSoon()}
