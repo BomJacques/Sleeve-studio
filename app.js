@@ -67,7 +67,25 @@ function layoutText(ctx,t,target,w,h){const a=area(target),aw=a.w*w,ah=a.h*h;con
  const x=clamp(a.x*w+t.x*aw-width/2,a.x*w+pad,(a.x+a.w)*w-width-pad),y=clamp(a.y*h+t.y*ah-height/2,a.y*h+pad,(a.y+a.h)*h-height-pad);
  return {lines,size,x,y,width,height,measure}
 }
-function drawType(ctx,t,target,w,h){const b=layoutText(ctx,t,target,w,h);ctx.save();ctx.fillStyle=t.color;ctx.textBaseline='middle';if(t.shadow!=='Off'){const deep=t.shadow==='Deep';ctx.shadowColor=deep?'#000e':'#0009';ctx.shadowBlur=b.size*(deep?.11:.06);ctx.shadowOffsetY=b.size*(deep?.065:.035)}
+const shadowPresets = {
+ Soft: {opacity:60, size:6, angle:90, distance:3.5},
+ Deep: {opacity:14 / 15 * 100, size:11, angle:90, distance:6.5}
+};
+function shadowSettings(layer) {
+ const preset = shadowPresets[layer.shadow];
+ return preset && {...preset, ...layer.shadowAdjustments?.[layer.shadow]};
+}
+function drawType(ctx,t,target,w,h){const b=layoutText(ctx,t,target,w,h);ctx.save();ctx.fillStyle=t.color;ctx.textBaseline='middle';
+ const shadow = shadowSettings(t);
+ if (shadow) {
+   const radians = shadow.angle * Math.PI / 180;
+   const preset = shadowPresets[t.shadow];
+   const distance = b.size * (preset.distance / 100) * (shadow.size / preset.size);
+   ctx.shadowColor = 'rgba(0,0,0,' + shadow.opacity / 100 + ')';
+   ctx.shadowBlur = b.size * shadow.size / 100;
+   ctx.shadowOffsetX = Math.cos(radians) * distance;
+   ctx.shadowOffsetY = Math.sin(radians) * distance;
+ }
  ctx.strokeStyle=t.outlineColor||'#151513';
  ctx.lineWidth=b.size*(t.outlineWidth??4)/100*2;
  ctx.lineJoin=t.outlineJoin||'round';
@@ -106,8 +124,29 @@ function outlineControls(t) {
  return '<div class="group"><label class="mask-check"><input id="outline" type="checkbox" '+(t.outline?'checked':'')+'>Text outline</label>'+(t.outline?'<div class="twofields fieldrow"><label class="field">Width (% of type)<input type="number" id="outlinewidth" min="0.2" max="20" step="0.2" value="'+(t.outlineWidth??4)+'"></label><label class="field">Outline colour<input class="paint-chip" id="outlinecolor" type="color" value="'+(t.outlineColor||'#151513')+'"></label></div><label class="fieldrow stack field">Corners<select id="outlinejoin">'+options+'</select></label>':'')+'</div>';
 }
 function imageTools(){const s=state.photoStyle,m=media.get(state.photo);return '<div class="group"><h3>Source image</h3><div class="file-info"><img src="'+m.src+'" alt=""><div><b>'+esc(m.name)+'</b><small id="source-dims"></small></div></div></div>'+compositeControls(s)+'<div class="group"><h3>Framing</h3>'+segment([['Fill','Fill','fill'],['Fit','Fit','fit']],s.fit,'fit')+slider('zoom','Scale',100,250,s.zoom,'%')+'<div class="row fieldrow"><button id="rotate" class="softbtn">'+icon('rotate')+'Rotate</button><button id="flip" class="softbtn" aria-pressed="'+s.mirror+'">'+icon('flip')+'Flip</button></div></div><div class="group"><h3>Colour treatment</h3><div class="lookgrid">'+['Original','Film','Mono'].map(v=>'<button class="look '+(v===s.look?'on':'')+'" data-look="'+v+'" aria-pressed="'+(v===s.look)+'"><img src="'+m.src+'" alt="">'+v+'</button>').join('')+'</div></div><div class="group"><div class="grouphead"><h3>Adjustments</h3><button id="reset">Reset</button></div>'+slider('exposure','Exposure',-60,60,s.exposure)+slider('contrast','Contrast',-60,60,s.contrast)+'</div>'}
-function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+outlineControls(t)+'<div class="group"><label class="field" for="shadow">Drop shadow</label><select id="shadow">'+['Off','Soft','Deep'].map(v=>'<option '+(t.shadow===v?'selected':'')+'>'+v+'</option>').join('')+'</select></div><div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
+function shadowControls(layer) {
+ const options = ['Off', ...Object.keys(shadowPresets)].map(name =>
+   '<option '+(layer.shadow===name?'selected':'')+'>'+name+'</option>').join('');
+ const settings = shadowSettings(layer);
+ let fields = '';
+ if (settings) {
+   fields = slider('shadowOpacity','Shadow opacity',0,100,Math.round(settings.opacity),'%')
+     + slider('shadowSize','Shadow size',0,50,settings.size,'%')
+     + slider('shadowAngle','Shadow angle',0,360,settings.angle,'°')
+     + '<p class="note">Size scales the blur and offset with the type. At 0° the shadow falls right, and at 90° it falls down.</p>';
+ }
+ return '<div class="group"><label class="field" for="shadow">Drop shadow</label><select id="shadow">'+options+'</select>'+fields+'</div>';
+}
+function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+outlineControls(t)+shadowControls(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
 function continuous(el,apply){let before=null;el.addEventListener('input',()=>{before??=snap();apply();redraw();saveSoon()});el.addEventListener('change',()=>{checkpoint(before);before=null});}
+function bindRange(id, suffix, setValue) {
+ const el = $(id);
+ continuous(el, () => {
+   setValue(Number(el.value));
+   $(id+'val').textContent = el.value + suffix;
+   el.style.setProperty('--fill', (el.value-el.min)/(el.max-el.min)*100+'%');
+ });
+}
 function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.toggle('on',!t);$('typetab').classList.toggle('on',!!t);$('imgtab').setAttribute('aria-pressed',!t);$('typetab').setAttribute('aria-pressed',!!t);$('controls').innerHTML=t?textTools(t):imageTools();
  $('controls').querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>change(()=>{(t||s)[b.dataset.key]=b.dataset.value;if(b.dataset.key==='fit')Object.assign(s,{panX:0,panY:0,zoom:100})}));
  if(!t){
@@ -117,15 +156,20 @@ function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.
  $('rotate').onclick=()=>change(()=>{s.rotation=(s.rotation+90)%360;s.panX=s.panY=0});$('flip').onclick=()=>change(()=>s.mirror=!s.mirror);$('reset').onclick=()=>change(()=>{s.exposure=s.contrast=0});
  $('controls').querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>change(()=>s.look=b.dataset.look));
  for(const key of ['opacity','zoom','contrast','exposure']){
-   const el=$(key);
    const suffix=(key==='opacity'||key==='zoom')?'%':'';
-   continuous(el,()=>{
-     s[key]=Number(el.value);
-     $(key+'val').textContent=el.value+suffix;
-     el.style.setProperty('--fill',(el.value-el.min)/(el.max-el.min)*100+'%');
-   });
+   bindRange(key,suffix,value=>{s[key]=value});
  }
  return}
+ if (shadowPresets[t.shadow]) {
+   const adjust = (key, value) => {
+     t.shadowAdjustments ??= {};
+     t.shadowAdjustments[t.shadow] ??= {};
+     t.shadowAdjustments[t.shadow][key] = value;
+   };
+   bindRange('shadowOpacity','%',value=>adjust('opacity',value));
+   bindRange('shadowSize','%',value=>adjust('size',value));
+   bindRange('shadowAngle','°',value=>adjust('angle',value));
+ }
  $('outline').onchange=e=>change(()=>t.outline=e.target.checked);
  if(t.outline){
    $('outlinewidth').onchange=e=>change(()=>t.outlineWidth=clamp(Number(e.target.value)||.2,.2,20));
