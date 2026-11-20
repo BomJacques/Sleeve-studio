@@ -34,10 +34,10 @@ const fonts=['DM Sans','DM Serif Text','Barlow Condensed','Archivo Black','Space
 const builtins={bloom:'Night bloom',tide:'Undertow',dune:'Dune study',haze:'Violet haze'};
 const media=new Map(),userFonts=new Map(),imgs=new Map(),processed=new Map();
 const defaults={fit:'Fill',rotation:0,mirror:false,zoom:100,panX:0,panY:0,look:'Original',exposure:0,contrast:0,visible:true};
-const textLayer=(v={})=>({id:crypto.randomUUID(),value:'New text',font:'DM Sans',size:9,color:'#fff6df',align:'center',x:.5,y:.5,italic:false,bold:false,visible:true,shadow:'Off',tracking:0,...v});
+const textLayer=(v={})=>({id:crypto.randomUUID(),role:'text',value:'New text',font:'DM Sans',size:9,color:'#fff6df',align:'center',x:.5,y:.5,italic:false,bold:false,visible:true,shadow:'Off',tracking:0,...v});
 let state={name:'Afterglow',format:'spotify',photo:'bloom',photoStyle:{...defaults},text:[
- textLayer({value:'Afterglow',font:'DM Serif Text',italic:true,size:20.1,y:.165}),
- textLayer({value:'VERA VALE',font:'Space Mono',size:2.6,y:.924,tracking:.28})
+ textLayer({role:'title',value:'Afterglow',font:'DM Serif Text',italic:true,size:20.1,y:.165}),
+ textLayer({role:'artist',value:'VERA VALE',font:'Space Mono',size:2.6,y:.924,tracking:.28})
 ],selected:'image',outputs:['spotify','apple']};
 let guides=false,undoStack=[],redoStack=[],lastImageToken=0,drag=null,lastText,db,ready=false,saveTimer,toastTimer,saveVersion=0;
 const snap=()=>JSON.stringify(state);
@@ -56,9 +56,28 @@ const fileData=file=>new Promise((ok,fail)=>{const r=new FileReader();r.onload=(
 function loadImg(id){if(!imgs.has(id)){const promise=new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>fail(new Error('Could not open this image.'));i.src=media.get(id).src});imgs.set(id,promise)}return imgs.get(id)}
 function fontWeight(t){return t.font==='Barlow Condensed'?800:t.bold?700:400}
 function cssFont(t,size){return (t.italic?'italic ':'')+fontWeight(t)+' '+size+'px "'+t.font+'", sans-serif'}
-function preloadText(){return Promise.all(state.text.map(t=>document.fonts.load(cssFont(t,40),t.value||'Aa')))}
-function area(t){return t.safe?{x:(1-t.safe[0])/2,y:(1-t.safe[1])/2,w:t.safe[0],h:t.safe[1]}:{x:.035,y:.025,w:.93,h:.95}}
-function layoutText(ctx,t,target,w,h){const a=area(target),aw=a.w*w,ah=a.h*h;const lines=(t.value||'').split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
+function preloadText(layers=state.text){return Promise.all(layers.map(t=>document.fonts.load(cssFont(t,40),t.value||'Aa')))}
+const coverLayouts = {
+ full:   {name:'Full bleed', photo:[0,0,1,1], text:[.035,.025,.93,.95]},
+ framed: {name:'Framed photo', photo:[.095,.27,.81,.57], text:[.045,.015,.91,.97]},
+ split:  {name:'Split cover', photo:[0,0,1,.60], text:[.055,.62,.89,.345]},
+ type:   {name:'Type only', photo:null, text:[.06,.31,.88,.38]}
+};
+function coverLayout(target, layout = state.layout) {
+ return target.w === target.h && Object.hasOwn(coverLayouts, layout) ? coverLayouts[layout] : coverLayouts.full;
+}
+function photoFrame(target, width, height, layout) {
+ const rect = coverLayout(target, layout).photo;
+ if (!rect) return null;
+ const [x,y,w,h] = rect;
+ return {x:x*width, y:y*height, w:w*width, h:h*height};
+}
+function area(target, layout) {
+ if (target.safe) return {x:(1-target.safe[0])/2,y:(1-target.safe[1])/2,w:target.safe[0],h:target.safe[1]};
+ const [x,y,w,h] = coverLayout(target, layout).text;
+ return {x,y,w,h};
+}
+function layoutText(ctx,t,target,w,h,layout){const a=area(target,layout),aw=a.w*w,ah=a.h*h;const lines=(t.value||'').split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
  const measure=line=>ctx.measureText(line).width+Math.max(0,Array.from(line).length-1)*size*t.tracking;
  let width=Math.max(1,...lines.map(measure)),height=size*1.12*lines.length;
  const strokePad=t.outline?size*(t.outlineWidth??4)/100:0;
@@ -75,7 +94,7 @@ function shadowSettings(layer) {
  const preset = shadowPresets[layer.shadow];
  return preset && {...preset, ...layer.shadowAdjustments?.[layer.shadow]};
 }
-function drawType(ctx,t,target,w,h){const b=layoutText(ctx,t,target,w,h);ctx.save();ctx.fillStyle=t.color;ctx.textBaseline='middle';
+function drawType(ctx,t,target,w,h,layout){const b=layoutText(ctx,t,target,w,h,layout);ctx.save();ctx.fillStyle=t.color;ctx.textBaseline='middle';
  const shadow = shadowSettings(t);
  if (shadow) {
    const radians = shadow.angle * Math.PI / 180;
@@ -107,10 +126,35 @@ function corrected(img,s){if(s.look==='Original'&&!s.exposure&&!s.contrast)retur
  p[i]=lut[clamp(Math.round(r),0,255)];p[i+1]=lut[clamp(Math.round(g),0,255)];p[i+2]=lut[clamp(Math.round(b),0,255)]}
  ctx.putImageData(data,0,0);processed.clear();processed.set(key,c);return c
 }
-function paint(canvas,img,target,w,h){canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:false,colorSpace:'srgb'});ctx.fillStyle=state.fillColor||'#151513';ctx.fillRect(0,0,w,h);const s=state.photoStyle;if(s.visible){const g=geometry(img,s,w,h);ctx.save();ctx.globalAlpha=(s.opacity??100)/100;ctx.imageSmoothingQuality='high';ctx.translate(w/2+s.panX*g.rangeX,h/2+s.panY*g.rangeY);ctx.scale(s.mirror?-1:1,1);ctx.rotate(s.rotation*Math.PI/180);ctx.scale(g.scale,g.scale);ctx.drawImage(maskedPhoto(img,corrected(img,s),s.mask),-img.width/2,-img.height/2);ctx.restore()}
- if(!target.noText)for(const t of [...state.text].reverse()){if(t.visible)drawType(ctx,t,target,w,h)}
+function paint(canvas,img,target,w,h,layout=state.layout,layers=state.text) {
+ canvas.width=w; canvas.height=h;
+ const ctx=canvas.getContext('2d',{alpha:false,colorSpace:'srgb'});
+ ctx.fillStyle=state.fillColor||'#151513';
+ ctx.fillRect(0,0,w,h);
+ const s=state.photoStyle, frame=photoFrame(target,w,h,layout);
+ if (s.visible && frame) {
+   const g=geometry(img,s,frame.w,frame.h);
+   ctx.save();
+   ctx.beginPath();
+   ctx.rect(frame.x,frame.y,frame.w,frame.h);
+   ctx.clip();
+   ctx.globalAlpha=(s.opacity??100)/100;
+   ctx.imageSmoothingQuality='high';
+   ctx.translate(frame.x+frame.w/2+s.panX*g.rangeX,frame.y+frame.h/2+s.panY*g.rangeY);
+   ctx.scale(s.mirror?-1:1,1);
+   ctx.rotate(s.rotation*Math.PI/180);
+   ctx.scale(g.scale,g.scale);
+   ctx.drawImage(maskedPhoto(img,corrected(img,s),s.mask),-img.width/2,-img.height/2);
+   ctx.restore();
+ }
+ if (!target.noText) for (const t of [...layers].reverse()) {
+   if (t.visible) drawType(ctx,t,target,w,h,layout);
+ }
 }
-async function redraw(){const token=++lastImageToken;try{const img=await loadImg(state.photo);await preloadText();if(token!==lastImageToken)return;const target=targets[state.format],rect=$('artwrap').getBoundingClientRect(),w=Math.max(1,Math.min(1600,Math.round(rect.width*(devicePixelRatio||1)))),h=Math.round(w*target.h/target.w);paint($('canvas'),img,target,w,h);const info=$('source-dims');if(info)info.textContent=img.width+' × '+img.height+' px'}catch(e){if(token===lastImageToken)toast(e.message)}}
+function listeningPreview(canvas,img) {
+ paint(canvas,img,targets.spotify,192,192);
+}
+async function redraw(){const token=++lastImageToken;try{const img=await loadImg(state.photo);await preloadText();if(token!==lastImageToken)return;const target=targets[state.format],rect=$('artwrap').getBoundingClientRect(),w=Math.max(1,Math.min(1600,Math.round(rect.width*(devicePixelRatio||1)))),h=Math.round(w*target.h/target.w);paint($('canvas'),img,target,w,h);listeningPreview($('listening'),img);const info=$('source-dims');if(info)info.textContent=img.width+' × '+img.height+' px'}catch(e){if(token===lastImageToken)toast(e.message)}}
 function gallery(){const parent=$('gallery');parent.innerHTML=Array.from(media,([id,m])=>'<button class="tile '+(id===state.photo?'active':'')+'" data-id="'+id+'" aria-pressed="'+(id===state.photo)+'"><span class="thumb"><img alt="" src="'+m.src+'">'+(id===state.photo?'<span class="tick">'+icon('check')+'</span>':'')+'</span>'+esc(m.name)+'</button>').join('');$('libcount').textContent=String(media.size).padStart(2,'0');parent.querySelectorAll('button').forEach(b=>b.onclick=()=>change(()=>{if(state.photo!==b.dataset.id){state.photo=b.dataset.id;state.photoStyle={...defaults}}state.selected='image'}))}
 function layerList(){const rows=[...state.text.map(t=>({id:t.id,label:t.value||'Empty text',visible:t.visible})),{id:'image',label:'Background',visible:state.photoStyle.visible}];$('layers').innerHTML=rows.map(t=>'<div class="layer '+(state.selected===t.id?'selected ':'')+(t.visible?'':'off')+'"><button class="layer-main" data-id="'+t.id+'"><span class="layer-icon">'+(t.id==='image'?'<img src="'+media.get(state.photo).src+'" alt="">':icon('type'))+'</span><span>'+esc(t.label)+'</span></button><button class="iconbtn visibility" data-id="'+t.id+'" aria-label="'+(t.visible?'Hide ':'Show ')+esc(t.label)+'">'+icon(t.visible?'eye':'eyeoff')+'</button></div>').join('');
  $('layers').querySelectorAll('.layer-main').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;sync();saveSoon()});$('layers').querySelectorAll('.visibility').forEach(b=>b.onclick=()=>change(()=>{const obj=b.dataset.id==='image'?state.photoStyle:state.text.find(t=>t.id===b.dataset.id);obj.visible=!obj.visible}))}
@@ -178,7 +222,7 @@ function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.
  }
  lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=()=>change(()=>{state.text=state.text.filter(l=>l!==t);state.selected=state.text[0]?.id||'image'})
 }
-function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=(a.y*100)+'% '+(a.x*100)+'%';$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
+function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=[a.y,1-a.x-a.w,1-a.y-a.h,a.x].map(v=>Math.max(0,v)*100+'%').join(' ');$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
 function addText(){change(()=>{const t=textLayer();state.text.unshift(t);state.selected=t.id});$('copy').focus();$('copy').select()}
 $('addlayer').onclick=addText;$('imgtab').onclick=()=>{state.selected='image';sync();saveSoon()};$('typetab').onclick=()=>{const t=state.text.find(l=>l.id===lastText)||state.text[0];if(!t)return addText();state.selected=t.id;sync();saveSoon()};
 $('format').innerHTML=Object.entries(formats).map(([id,n])=>'<option value="'+id+'">'+n+'</option>').join('');
@@ -196,9 +240,10 @@ $('fontfile').onchange=async e=>{const file=e.target.files[0];e.target.value='';
 const canvas=$('canvas');
 canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
  if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);return x>=b.x-4&&x<=b.x+b.width+4&&y>=b.y-4&&y<=b.y+b.height+4});
+ if(!hit&&!photoFrame(tgt,canvas.width,canvas.height))return;
  state.selected=hit?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:hit?.x??state.photoStyle.panX,oy:hit?.y??state.photoStyle.panY,img,rect};sync()};
 canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),target=targets[state.format];
- if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else{const s=state.photoStyle,g=geometry(img,s,rect.width,rect.height);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
+ if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
 document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
@@ -225,12 +270,70 @@ $('help').addEventListener('click', event => {
   }
 });
 
+let layoutDraft, layoutImage, cardFrame;
+const layoutDialog = $('layoutdlg');
+const cards = $('layoutcards');
+cards.innerHTML = Object.entries(coverLayouts).map(([id, layout]) =>
+ '<label class="layout-card"><input type="radio" name="coverlayout" value="'+id+'"><canvas aria-hidden="true"></canvas><span>'+layout.name+'</span></label>'
+).join('');
+function updateDraftText(role, value) {
+ let layer = layoutDraft.find(t=>t.role===role);
+ if (!layer && value) {
+   layer = role==='title'
+     ? textLayer({role, font:'DM Serif Text', italic:true, size:20.1, y:.165})
+     : textLayer({role, font:'Space Mono', size:2.6, y:.924, tracking:.28});
+   layoutDraft.push(layer);
+ }
+ if (layer) layer.value=value;
+}
+function paintCards() {
+ const size = Math.min(400,Math.max(200,Math.round(cards.querySelector('canvas').clientWidth * (devicePixelRatio||1))));
+ for (const card of cards.children) paint(card.querySelector('canvas'),layoutImage,targets.spotify,size,size,card.querySelector('input').value,layoutDraft);
+}
+$('openlayouts').onclick = async () => {
+ try {
+   layoutImage = await loadImg(state.photo);
+   await preloadText();
+   layoutDraft = structuredClone(state.text);
+   for (const role of ['title','artist']) $('release-'+role).value=layoutDraft.find(t=>t.role===role)?.value||'';
+   const current = state.layout || 'full';
+   for (const input of cards.querySelectorAll('input')) input.checked=input.value===current;
+   layoutDialog.showModal();
+   paintCards();
+ } catch { toast('Could not load the cover previews. Please try again.') }
+};
+for (const role of ['title','artist']) $('release-'+role).oninput = event => {
+ updateDraftText(role,event.target.value);
+ cancelAnimationFrame(cardFrame);
+ const draft=layoutDraft;
+ cardFrame=requestAnimationFrame(async()=>{
+   await preloadText(draft);
+   if (layoutDialog.open && draft===layoutDraft) paintCards();
+ });
+};
+layoutDialog.onclose = () => { cancelAnimationFrame(cardFrame); layoutDraft=null; layoutImage=null };
+$('applylayout').onclick = () => {
+ const layout=cards.querySelector('input:checked').value;
+ change(()=>{
+   state.layout=layout;
+   state.text=layoutDraft;
+   if (targets[state.format].w!==targets[state.format].h) {
+     state.format='spotify';
+     if (!state.outputs.includes('spotify')) state.outputs.push('spotify');
+   }
+   if (layout==='type' && state.selected==='image') state.selected=state.text.find(t=>t.role==='title')?.id||'image';
+ });
+ layoutDialog.close();
+};
 let preparedUrl,exportBusy=false;
 function previewTargets(img){const wrapper=$('targets');wrapper.innerHTML='';for(const [id,t] of Object.entries(targets)){const label=document.createElement('label');label.className='choice';label.innerHTML='<input type="checkbox" value="'+id+'" '+(state.outputs.includes(id)?'checked':'')+'><canvas class="export-preview"></canvas><span><b>'+t.name+'</b><small>'+t.kind+'</small></span><span class="exportdims">'+t.w+' × '+t.h+'</span>';wrapper.append(label);paint(label.querySelector('canvas'),img,t,100,Math.round(100*t.h/t.w));label.querySelector('input').onchange=e=>{state.outputs=e.target.checked?[...new Set([...state.outputs,id])]:state.outputs.filter(k=>k!==id);clearDownload();exportSummary(img);saveSoon()}}}
 function clearDownload(){if(preparedUrl){URL.revokeObjectURL(preparedUrl);preparedUrl=null}$('downloadlink').hidden=true}
-function exportSummary(img){const n=state.outputs.length;$('exportcount').textContent=n===1?'1 image':n+' images · ZIP';$('download').disabled=!n;$('download').innerHTML=icon('download')+(n>1?'Download ZIP':'Download image');
- const scales=state.outputs.filter(id=>state.photoStyle.visible&&geometry(img,state.photoStyle,targets[id].w,targets[id].h).scale>1.005);const notes=[];if(scales.length)notes.push('The '+img.width+' × '+img.height+' source will be enlarged. Use a larger original for release-quality artwork.');if(state.outputs.includes('header'))notes.push('Spotify artist headers use the image layer only.');$('exportnote').textContent=notes.join(' ');$('exportnote').className=notes.length?'exportwarnings':''}
-async function showExport(){if(exportBusy)return;try{await preloadText();const img=await loadImg(state.photo);clearDownload();previewTargets(img);exportSummary(img);$('exportdlg').showModal()}catch{toast('The artwork is still loading. Try again in a moment.')}}
+function exportSummary(img){$('export-listening').hidden=!state.outputs.some(id=>targets[id].w===targets[id].h);const n=state.outputs.length;$('exportcount').textContent=n===1?'1 image':n+' images · ZIP';$('download').disabled=!n;$('download').innerHTML=icon('download')+(n>1?'Download ZIP':'Download image');
+ const scales=state.outputs.filter(id=>{
+   const t=targets[id],frame=photoFrame(t,t.w,t.h);
+   return state.photoStyle.visible && frame && geometry(img,state.photoStyle,frame.w,frame.h).scale>1.005;
+ });const notes=[];if(scales.length)notes.push('The '+img.width+' × '+img.height+' source will be enlarged. Use a larger original for release-quality artwork.');if(state.outputs.includes('header'))notes.push('Spotify artist headers use the image layer only.');$('exportnote').textContent=notes.join(' ');$('exportnote').className=notes.length?'exportwarnings':''}
+async function showExport(){if(exportBusy)return;try{await preloadText();const img=await loadImg(state.photo);clearDownload();listeningPreview($('exportthumb'),img);previewTargets(img);exportSummary(img);$('exportdlg').showModal()}catch{toast('The artwork is still loading. Try again in a moment.')}}
 $('export').onclick=showExport;
 const asBlob=(c,type,q)=>new Promise((ok,fail)=>c.toBlob(b=>b?ok(b):fail(new Error('This browser could not render the artwork.')),type,q));
 const crcTable=Uint32Array.from({length:256},(_,v)=>{for(let j=0;j<8;j++)v=(v&1)?0xedb88320^(v>>>1):v>>>1;return v>>>0});
@@ -269,6 +372,16 @@ async function start() {
    for (const [name, src] of fonts || []) await addFace(name, src);
    if (project && media.has(project.photo) && targets[project.format]) {
      state = project;
+     // Earlier projects stored the two starter layers at the end of the stack.
+     // Added layers always went to the front. Preserve every layer and its text.
+     if (state.text.length && state.text.every(layer => !layer.role)) {
+       const last = state.text[state.text.length-1];
+       const artist = last.tracking === .28 ? last : null;
+       const title = state.text[state.text.length-(artist ? 2 : 1)];
+       for (const layer of state.text) layer.role = 'text';
+       if (title) title.role = 'title';
+       if (artist) artist.role = 'artist';
+     }
      $('savestatus').textContent = 'Saved locally · refresh resets cover';
    } else {
      $('savestatus').textContent = 'Fresh cover';
