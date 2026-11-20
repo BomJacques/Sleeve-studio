@@ -99,7 +99,7 @@ function layerList(){const rows=[...state.text.map(t=>({id:t.id,label:t.value||'
 function segment(values,active,key){return '<div class="seg">'+values.map(([v,title,ic])=>'<button data-key="'+key+'" data-value="'+v+'" class="'+(v===active?'on':'')+'" aria-pressed="'+(v===active)+'" aria-label="'+title+'">'+(ic?icon(ic):'')+(key==='align'?'':title)+'</button>').join('')+'</div>'}
 function slider(k,l,min,max,value,suffix=''){return '<div class="fieldrow"><label class="labelrow compact" for="'+k+'">'+l+'<output class="value" id="'+k+'val">'+value+suffix+'</output></label><input type="range" id="'+k+'" min="'+min+'" max="'+max+'" value="'+value+'" style="--fill:'+((value-min)/(max-min)*100)+'%"></div>'}
 function compositeControls(style) {
- return '<div class="group"><div class="twofields"><label class="field">Image opacity (%)<input id="opacity" type="number" min="0" max="100" value="'+(style.opacity??100)+'"></label><label class="field">Canvas fill<input id="canvasfill" class="paint-chip" type="color" value="'+(state.fillColor||'#151513')+'"></label></div><div class="row fieldrow"><button class="softbtn" id="editmask">'+(style.mask?'Edit mask':'Object mask')+'</button>'+(style.mask?'<button class="softbtn" id="clearmask">Remove mask</button>':'')+'</div></div>';
+ return '<div class="group">'+slider('opacity','Image opacity',0,100,style.opacity??100,'%')+'<label class="fieldrow stack field">Canvas fill<input id="canvasfill" class="paint-chip" type="color" value="'+(state.fillColor||'#151513')+'"></label><div class="row fieldrow"><button class="softbtn" id="editmask">'+(style.mask?'Edit mask':'Object mask')+'</button>'+(style.mask?'<button class="softbtn" id="clearmask">Remove mask</button>':'')+'</div></div>';
 }
 function outlineControls(t) {
  const options=['round','bevel','miter'].map((value,i)=>'<option value="'+value+'" '+((t.outlineJoin||'round')===value?'selected':'')+'>'+['Round','Bevel','Sharp'][i]+'</option>').join('');
@@ -111,12 +111,21 @@ function continuous(el,apply){let before=null;el.addEventListener('input',()=>{b
 function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.toggle('on',!t);$('typetab').classList.toggle('on',!!t);$('imgtab').setAttribute('aria-pressed',!t);$('typetab').setAttribute('aria-pressed',!!t);$('controls').innerHTML=t?textTools(t):imageTools();
  $('controls').querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>change(()=>{(t||s)[b.dataset.key]=b.dataset.value;if(b.dataset.key==='fit')Object.assign(s,{panX:0,panY:0,zoom:100})}));
  if(!t){
- $('opacity').onchange=e=>change(()=>s.opacity=clamp(Math.round(Number(e.target.value)),0,100));
  continuous($('canvasfill'),()=>state.fillColor=$('canvasfill').value);
  $('editmask').onclick=async()=>{const id=state.photo;try{const img=await loadImg(id);if(id===state.photo)openMaskEditor(img)}catch{toast('Could not open the image for masking.')}};
  if($('clearmask'))$('clearmask').onclick=()=>change(()=>delete s.mask);
  $('rotate').onclick=()=>change(()=>{s.rotation=(s.rotation+90)%360;s.panX=s.panY=0});$('flip').onclick=()=>change(()=>s.mirror=!s.mirror);$('reset').onclick=()=>change(()=>{s.exposure=s.contrast=0});
- $('controls').querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>change(()=>s.look=b.dataset.look));for(const key of ['zoom','contrast','exposure']){const el=$(key);continuous(el,()=>{s[key]=Number(el.value);$(key+'val').textContent=el.value+(key==='zoom'?'%':'');el.style.setProperty('--fill',(el.value-el.min)/(el.max-el.min)*100+'%')})}return}
+ $('controls').querySelectorAll('[data-look]').forEach(b=>b.onclick=()=>change(()=>s.look=b.dataset.look));
+ for(const key of ['opacity','zoom','contrast','exposure']){
+   const el=$(key);
+   const suffix=(key==='opacity'||key==='zoom')?'%':'';
+   continuous(el,()=>{
+     s[key]=Number(el.value);
+     $(key+'val').textContent=el.value+suffix;
+     el.style.setProperty('--fill',(el.value-el.min)/(el.max-el.min)*100+'%');
+   });
+ }
+ return}
  $('outline').onchange=e=>change(()=>t.outline=e.target.checked);
  if(t.outline){
    $('outlinewidth').onchange=e=>change(()=>t.outlineWidth=clamp(Number(e.target.value)||.2,.2,20));
