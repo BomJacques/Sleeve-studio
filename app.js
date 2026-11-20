@@ -51,7 +51,7 @@ function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;
 function openDB(){return new Promise((ok,fail)=>{const q=indexedDB.open('sleeve-studio-v1',1);q.onupgradeneeded=()=>q.result.createObjectStore('workspace');q.onsuccess=()=>ok(q.result);q.onerror=()=>fail(q.error)})}
 function dbGet(key){return new Promise((ok,fail)=>{const q=db.transaction('workspace').objectStore('workspace').get(key);q.onsuccess=()=>ok(q.result);q.onerror=()=>fail(q.error)})}
 function dbPut(key,value){return new Promise((ok,fail)=>{const tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').put(value,key);tx.oncomplete=ok;tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error)})}
-function saveSoon(){if(!ready||!db)return;const version=++saveVersion;clearTimeout(saveTimer);$('savestatus').textContent='Saving locally…';saveTimer=setTimeout(async()=>{try{await dbPut('project',structuredClone(state));if(version===saveVersion)$('savestatus').textContent='Saved on this device'}catch{$('savestatus').textContent='Local save unavailable'}},160)}
+function saveSoon(){if(!ready||!db)return;const version=++saveVersion;clearTimeout(saveTimer);$('savestatus').textContent='Saving locally…';saveTimer=setTimeout(async()=>{try{await dbPut('project',structuredClone(state));if(version===saveVersion)$('savestatus').textContent='Saved locally · refresh resets cover'}catch{$('savestatus').textContent='Local save unavailable'}},160)}
 const fileData=file=>new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=fail;r.readAsDataURL(file)});
 function loadImg(id){if(!imgs.has(id)){const promise=new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>fail(new Error('Could not open this image.'));i.src=media.get(id).src});imgs.set(id,promise)}return imgs.get(id)}
 function fontWeight(t){return t.font==='Barlow Condensed'?800:t.bold?700:400}
@@ -248,8 +248,36 @@ $('download').onclick=async()=>{if(exportBusy||!state.outputs.length)return;expo
  while(t.limit&&blob.size>t.limit&&quality>.35){quality-=.1;blob=await asBlob(c,'image/jpeg',quality)}c.width=c.height=1;if(t.limit&&blob.size>t.limit)throw new Error('The banner exceeds the platform size limit. Try a simpler image.');files.push({blob,name:base+'-'+id+'-'+t.w+'x'+t.h+'.'+t.ext})}
  const single=files.length===1,blob=single?files[0].blob:await makeZip(files),a=$('downloadlink');preparedUrl=URL.createObjectURL(blob);a.href=preparedUrl;a.download=single?files[0].name:base+'-artwork.zip';a.hidden=false;a.textContent='Save '+a.download;a.click();$('exportcount').textContent='Export ready'}catch(e){$('exportcount').textContent=e.message||'Export failed. Please try again.'}finally{exportBusy=false;dlg.querySelectorAll('button,input').forEach(el=>el.disabled=false)}};
 document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
-async function start(){for(const [id,name] of Object.entries(builtins))media.set(id,{name,src:artworkSources[id]});
- try{db=await openDB();const [uploads,custom,project]=await Promise.all([dbGet('media'),dbGet('fonts'),dbGet('project')]);for(const [id,m] of uploads||[])media.set(id,m);for(const [name,src] of custom||[])await addFace(name,src);if(project&&media.has(project.photo)&&targets[project.format])state=project;$('savestatus').textContent='Saved on this device'}catch{$('savestatus').textContent='Session workspace'}
- ready=true;sync();saveSoon()}
+function readProjectOnOpen() {
+ const navigation = performance.getEntriesByType('navigation')[0];
+ const reloaded = navigation?.type === 'reload' || performance.navigation?.type === 1;
+ if (!reloaded) return dbGet('project');
+ return new Promise((resolve, reject) => {
+   const tx = db.transaction('workspace', 'readwrite');
+   tx.objectStore('workspace').delete('project');
+   tx.oncomplete = () => resolve(undefined);
+   tx.onabort = () => reject(tx.error);
+   tx.onerror = () => reject(tx.error);
+ });
+}
+async function start() {
+ for (const [id,name] of Object.entries(builtins)) media.set(id,{name,src:artworkSources[id]});
+ try {
+   db = await openDB();
+   const [uploads, fonts, project] = await Promise.all([dbGet('media'), dbGet('fonts'), readProjectOnOpen()]);
+   for (const [id, item] of uploads || []) media.set(id, item);
+   for (const [name, src] of fonts || []) await addFace(name, src);
+   if (project && media.has(project.photo) && targets[project.format]) {
+     state = project;
+     $('savestatus').textContent = 'Saved locally · refresh resets cover';
+   } else {
+     $('savestatus').textContent = 'Fresh cover';
+   }
+ } catch {
+   $('savestatus').textContent = 'Session workspace';
+ }
+ ready = true;
+ sync();
+}
 setupMaskEditor();
 start();
