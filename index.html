@@ -19,14 +19,31 @@
 <aside class="inspector"><div class="pane-title"><i data-icon="adjust"></i><h2>Inspector</h2></div><div class="inspector-body"><div class="tabs" aria-label="Inspector tools"><button id="imgtab"><i data-icon="image"></i>Image</button><button id="typetab"><i data-icon="type"></i>Text</button></div><div id="controls"></div></div></aside>
 </main>
 <footer class="statusbar"><span><i class="save-dot"></i><span id="savestatus" role="status">Local workspace</span></span><span class="status-right"><i data-icon="cursor"></i><span id="dragtip">Drag artwork to reposition</span><span class="key">?</span><button id="shortcuts">Shortcuts</button></span></footer>
+<dialog id="maskdialog" aria-labelledby="masktitle">
+  <div class="modalhead help-head"><h2 id="masktitle">Object mask</h2><button class="iconbtn close" aria-label="Cancel mask edits"><i data-icon="close"></i></button></div>
+  <div class="mask-layout">
+    <div class="mask-image"><div class="mask-stage"><canvas id="maskpreview" aria-label="Click the image to select an area or paint with the active brush"></canvas></div>
+      <label class="mask-check"><input id="maskghost" type="checkbox" checked> Show hidden areas dimmed</label></div>
+    <div class="mask-tools">
+      <label>Selection tool<select id="maskmode"><option value="select">Select object area</option><option value="subtract">Remove area</option><option value="restore">Restore brush</option><option value="erase">Erase brush</option></select></label>
+      <p id="maskhint"></p>
+      <label id="tolerancefield">Colour tolerance<select id="masktolerance"><option value="16">Narrow</option><option value="36" selected>Medium</option><option value="72">Broad</option></select></label>
+      <label id="brushfield">Brush size<select id="maskbrush"><option value="0.012">Fine</option><option value="0.04" selected>Medium</option><option value="0.10">Large</option></select></label>
+      <label>Edge shift<select id="maskedge"><option value="-5">Contract more</option><option value="-2">Contract</option><option value="0">Original edge</option><option value="2">Expand</option><option value="5">Expand more</option></select></label>
+      <label>Edge smoothing<select id="masksmooth"><option value="0">Sharp</option><option value="1">Light</option><option value="3">Soft</option><option value="8">Feathered</option></select></label>
+      <label class="mask-check"><input id="maskinvert" type="checkbox"> Invert mask</label>
+    </div>
+  </div>
+  <div class="mask-actions"><button id="maskundo" class="softbtn">Undo selection</button><button class="softbtn close">Cancel</button><button id="maskapply" class="primary">Apply mask</button></div>
+</dialog>
 <dialog id="exportdlg"><div class="modalhead"><h2>Export artwork</h2><button class="iconbtn close" aria-label="Close"><i data-icon="close"></i></button></div><p>Choose the platforms for this release.</p><div id="targets"></div><div id="exportnote"></div><div class="modalfoot"><span id="exportcount"></span><button id="download" class="primary"><i data-icon="download"></i>Download</button></div><a id="downloadlink" hidden>Save prepared export</a></dialog>
 <dialog id="help" aria-labelledby="help-title">
   <div class="modalhead help-head"><h2 id="help-title">Studio help</h2><button class="iconbtn close" autofocus aria-label="Close help"><i data-icon="close"></i></button></div>
   <div class="help-body">
     <section><i data-icon="image"></i><div><h3>Start with an image</h3><p>Drop a photo onto the canvas, use <strong>Upload image</strong>, or choose from the Studio collection. For a sharp export, start with an original at least as large as the target dimensions.</p></div></section>
     <section><i data-icon="frame"></i><div><h3>Frame a cover or banner</h3><p>Choose a format above the canvas. <strong>Fill</strong> crops to the edges. <strong>Fit</strong> keeps the whole image visible. Adjust <strong>Scale</strong> and drag the background to shift the crop. Turn on <strong>Guides</strong> to see the text area for that format.</p></div></section>
-    <section><i data-icon="type"></i><div><h3>Add a title or artist name</h3><p>Click <strong>+</strong> beside <strong>Layers</strong> to add text, or select an existing text layer to edit it. Drag the text into place. In the Text inspector, choose a typeface, set a colour and add a drop shadow. <strong>Upload font</strong> accepts TTF, OTF, WOFF and WOFF2.</p></div></section>
-    <section><i data-icon="adjust"></i><div><h3>Adjust the image</h3><p>Select <strong>Background</strong> in Layers. Use the Image inspector to rotate or flip the photo, pick a colour treatment, or adjust exposure and contrast.</p></div></section>
+    <section><i data-icon="type"></i><div><h3>Add a title or artist name</h3><p>Click <strong>+</strong> beside <strong>Layers</strong> to add text, or select an existing text layer to edit it. Drag the text into place. In the Text inspector, choose a typeface, set a colour and add a drop shadow. Turn on <strong>Text outline</strong> to set its colour, width and corner style. <strong>Upload font</strong> accepts TTF, OTF, WOFF and WOFF2.</p></div></section>
+    <section><i data-icon="adjust"></i><div><h3>Adjust the image</h3><p>Select <strong>Background</strong> in Layers. Use the Image inspector to rotate or flip the photo, pick a colour treatment, or adjust exposure and contrast. Set <strong>Image opacity</strong> to reveal the <strong>Canvas fill</strong> underneath. Open <strong>Object mask</strong> and click to keep connected areas of similar colour. Use the brushes for detailed fixes, adjust the edge shift and smoothing, then click <strong>Apply mask</strong>.</p></div></section>
     <section><i data-icon="download"></i><div><h3>Export for your platforms</h3><p>Open <strong>Export artwork</strong> and tick the destinations you need. One selection downloads an image. Several selections download together in a ZIP. Spotify artist headers use the background image only.</p></div></section>
     <details id="help-keys"><summary><i data-icon="grid"></i>Keyboard shortcuts</summary>
       <dl><dt>Undo</dt><dd>⌘ Z</dd><dt>Redo</dt><dd>⇧ ⌘ Z</dd><dt>Export artwork</dt><dd>⌘ E</dd><dt>Toggle guides</dt><dd>G</dd><dt>Nudge selected layer</dt><dd>Arrow keys</dd><dt>Larger nudge</dt><dd>Shift + arrows</dd><dt>Open help</dt><dd>?</dd><dt>Close overlay</dt><dd>Esc</dd></dl>
@@ -35,4 +52,4 @@
   </div>
 </dialog>
 <input type="file" id="fontfile" accept=".woff,.woff2,.ttf,.otf" hidden><div id="toast" role="status" hidden></div>
-<script>const artworkSources={"bloom": "assets/bloom.jpg", "dune": "assets/dune.jpg", "haze": "assets/haze.jpg", "tide": "assets/tide.jpg"};</script><script src="app.js"></script></body></html>
+<script>const artworkSources={"bloom": "assets/bloom.jpg", "dune": "assets/dune.jpg", "haze": "assets/haze.jpg", "tide": "assets/tide.jpg"};</script><script src="mask.js"></script><script src="app.js"></script></body></html>
