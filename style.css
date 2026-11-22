@@ -86,3 +86,11 @@ dialog{width:min(470px,calc(100% - 28px));max-height:90dvh;overflow:auto;margin:
 .sel-h.side-e{right:-7px;top:calc(50% - 6px);cursor:ew-resize}.sel-h.side-w{left:-7px;top:calc(50% - 6px);cursor:ew-resize}
 .sel-h.side-n{top:-7px;left:calc(50% - 6px);cursor:ns-resize}.sel-h.side-s{bottom:-7px;left:calc(50% - 6px);cursor:ns-resize}
 .imgsel .sel-s{display:none}
+
+.stage{overflow:hidden}
+@media(min-width:901px){
+ body{height:100dvh;overflow:hidden}
+ main{min-height:0;overflow:hidden}
+ .library,.inspector{min-height:0;overflow-y:auto;scrollbar-width:thin}
+ .workspace{min-height:0;overflow:hidden}
+}

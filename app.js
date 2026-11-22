@@ -327,7 +327,7 @@ $('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.poi
  redraw()});
 const endHandle=e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const before=handleOp.before;handleOp=null;checkpoint(before);sync()};
 $('selbox').addEventListener('pointerup',endHandle);$('selbox').addEventListener('pointercancel',endHandle);
-function addText(){change(()=>{const t=textLayer();state.text.unshift(t);state.selected=t.id});$('copy').focus();$('copy').select()}
+function addText(){change(()=>{const t=textLayer();state.text.unshift(t);state.selected=t.id});$('copy').focus({preventScroll:true});$('copy').select()}
 $('addlayer').onclick=addText;$('imgtab').onclick=()=>{state.selected='image';sync();saveSoon()};$('typetab').onclick=()=>{const t=state.text.find(l=>l.id===lastText)||state.text[0];if(!t)return addText();state.selected=t.id;sync();saveSoon()};
 $('format').innerHTML=Object.entries(formats).map(([id,n])=>'<option value="'+id+'">'+n+'</option>').join('');
 $('format').onchange=e=>change(()=>{state.format=e.target.value;if(!state.outputs.includes(state.format))state.outputs.push(state.format);if(targets[state.format].noText)state.selected='image'});
@@ -343,7 +343,7 @@ async function addFace(name,src){const face=new FontFace(name,'url('+src+')');aw
 $('fontfile').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{let base=file.name.replace(/\.[^.]+$/,'').replace(/[^\p{L}\p{N} _-]/gu,'').trim()||'Custom font',name=base,n=2;while(fonts.includes(name)||userFonts.has(name))name=base+' '+n++;
  await addFace(name,await fileData(file));let stored=true;if(db)try{await dbPut('fonts',Array.from(userFonts))}catch{stored=false}change(()=>{if(selected())selected().font=name});toast(stored?'Font added to your typefaces':'Font loaded for this session. Device storage is full.')}catch{toast('Could not read that font. Choose a TTF, OTF, WOFF or WOFF2 file.')}};
 const canvas=$('canvas');
-canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
+canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus({preventScroll:true});canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
  if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);let px=x,py=y;if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2,r=-t.rotation*Math.PI/180,dx=x-cx,dy=y-cy;px=cx+dx*Math.cos(r)-dy*Math.sin(r);py=cy+dx*Math.sin(r)+dy*Math.cos(r)}const p=Math.max(4,b.size*padOf(t)/100);return px>=b.x-p&&px<=b.x+b.width+p&&py>=b.y-p&&py<=b.y+b.height+p});
  let ov;if(!hit&&!tgt.noText)ov=state.images.find(o=>o.visible&&overlayHit(o,x,y,canvas));
  const lay=hit||ov;
@@ -351,7 +351,7 @@ canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setP
  state.selected=lay?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:lay?.x??state.photoStyle.panX,oy:lay?.y??state.photoStyle.panY,img,rect};sync()};
 canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),ov=selectedOverlay(),target=targets[state.format];
  if(t){if(!t.free){makeFree(t);drag.ox=t.x;drag.oy=t.y}t.x=clamp(drag.ox+dx/rect.width,-.25,1.25);t.y=clamp(drag.oy+dy/rect.height,-.25,1.25)}else if(ov){ov.x=clamp(ox+dx/rect.width,-.25,1.25);ov.y=clamp(oy+dy/rect.height,-.25,1.25)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
-canvas.ondblclick=()=>{if(selected()&&$('copy')){$('copy').focus();$('copy').select()}};
+canvas.ondblclick=()=>{if(selected()&&$('copy')){$('copy').focus({preventScroll:true});$('copy').select()}};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
 document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
