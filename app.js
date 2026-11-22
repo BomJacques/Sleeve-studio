@@ -18,7 +18,7 @@ const glyphs = {
  fill:'<path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5M8 8h8v8H8z"/>',
  fit:'<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 8h10v8H7z"/>',
  rotate:'<path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>', flip:'<path d="M12 2v3m0 3v3m0 3v3m0 3v2M3 6l5 12H3zm18 0-5 12h5z"/>',
- cursor:'<path d="m5 3 14 10-7 1-3 7z"/>',left:'<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',center:'<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',right:'<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',trash:'<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 9v8m4-8v8"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',up:'<path d="m6 14 6-6 6 6"/>',down:'<path d="m6 10 6 6 6-6"/>'
+ cursor:'<path d="m5 3 14 10-7 1-3 7z"/>',left:'<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',center:'<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',right:'<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',trash:'<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 9v8m4-8v8"/>',imageplus:'<rect x="3" y="5" width="14" height="14" rx="2"/><path d="m4 16 4-4 3 3 2-2 4 4M19 3v6m-3-3h6"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',up:'<path d="m6 14 6-6 6 6"/>',down:'<path d="m6 10 6 6 6-6"/>'
 };
 const icon = name => '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24">'+(glyphs[name]||'')+'</svg>';
 document.querySelectorAll('[data-icon]').forEach(el=>el.outerHTML=icon(el.dataset.icon));
@@ -32,16 +32,19 @@ const targets = {
 const formats={spotify:'Album cover',apple:'Apple cover',bandcamp:'Bandcamp cover',youtube:'YouTube banner',header:'Spotify header'};
 const fonts=['DM Sans','DM Serif Text','Barlow Condensed','Archivo Black','Space Mono','Playfair Display','Bricolage Grotesque','Cormorant Garamond','Courier Prime','Space Grotesk','Rubik','Young Serif'];
 const builtins={bloom:'Night bloom',tide:'Undertow',dune:'Dune study',haze:'Violet haze'};
-const media=new Map(),userFonts=new Map(),imgs=new Map(),processed=new Map();
+const media=new Map(),userFonts=new Map(),imgs=new Map(),processed=new Map(),resolved=new Map();
 const defaults={fit:'Fill',rotation:0,mirror:false,zoom:100,panX:0,panY:0,look:'Original',exposure:0,contrast:0,visible:true};
 const textLayer=(v={})=>({id:crypto.randomUUID(),role:'text',value:'New text',font:'DM Sans',size:9,color:'#fff6df',align:'center',x:.5,y:.5,italic:false,bold:false,visible:true,shadow:'Off',tracking:0,...v});
 let state={name:'Afterglow',format:'spotify',photo:'bloom',photoStyle:{...defaults},text:[
  textLayer({role:'title',value:'Afterglow',font:'DM Serif Text',italic:true,size:20.1,y:.165}),
  textLayer({role:'artist',value:'VERA VALE',font:'Space Mono',size:2.6,y:.924,tracking:.28})
-],selected:'image',outputs:['spotify','apple']};
+],images:[],selected:'image',outputs:['spotify','apple']};
 let guides=false,undoStack=[],redoStack=[],lastImageToken=0,drag=null,lastText,db,ready=false,saveTimer,toastTimer,saveVersion=0;
 const snap=()=>JSON.stringify(state);
 const selected=()=>state.text.find(t=>t.id===state.selected);
+const selectedOverlay=()=>state.images.find(o=>o.id===state.selected);
+const selLayer=()=>selected()||selectedOverlay();
+const layerArray=l=>state.images.includes(l)?state.images:state.text;
 function checkpoint(before){if(!before||before===snap())return;undoStack.push(before);if(undoStack.length>70)undoStack.shift();redoStack=[];historyUI();saveSoon()}
 function change(fn){const before=snap();fn();checkpoint(before);sync()}
 function historyUI(){$('undo').disabled=!undoStack.length;$('redo').disabled=!redoStack.length}
@@ -53,10 +56,11 @@ function dbGet(key){return new Promise((ok,fail)=>{const q=db.transaction('works
 function dbPut(key,value){return new Promise((ok,fail)=>{const tx=db.transaction('workspace','readwrite');tx.objectStore('workspace').put(value,key);tx.oncomplete=ok;tx.onerror=()=>fail(tx.error);tx.onabort=()=>fail(tx.error)})}
 function saveSoon(){if(!ready||!db)return;const version=++saveVersion;clearTimeout(saveTimer);$('savestatus').textContent='Saving locally…';saveTimer=setTimeout(async()=>{try{await dbPut('project',structuredClone(state));if(version===saveVersion)$('savestatus').textContent='Saved locally · refresh resets cover'}catch{$('savestatus').textContent='Local save unavailable'}},160)}
 const fileData=file=>new Promise((ok,fail)=>{const r=new FileReader();r.onload=()=>ok(r.result);r.onerror=fail;r.readAsDataURL(file)});
-function loadImg(id){if(!imgs.has(id)){const promise=new Promise((ok,fail)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=()=>fail(new Error('Could not open this image.'));i.src=media.get(id).src});imgs.set(id,promise)}return imgs.get(id)}
+function loadImg(id){if(!imgs.has(id)){const promise=new Promise((ok,fail)=>{const i=new Image();i.onload=()=>{resolved.set(id,i);ok(i)};i.onerror=()=>fail(new Error('Could not open this image.'));i.src=media.get(id).src});imgs.set(id,promise)}return imgs.get(id)}
 function fontWeight(t){return t.font==='Barlow Condensed'?800:t.bold?700:400}
 function cssFont(t,size){return (t.italic?'italic ':'')+fontWeight(t)+' '+size+'px "'+t.font+'", sans-serif'}
-function preloadText(layers=state.text){return Promise.all(layers.map(t=>document.fonts.load(cssFont(t,40),t.value||'Aa')))}
+// Loads text fonts and every image layer so the synchronous painter has them ready.
+function preloadText(layers=state.text){return Promise.all([...layers.map(t=>document.fonts.load(cssFont(t,40),t.value||'Aa')),...state.images.map(o=>loadImg(o.media))])}
 const coverLayouts = {
  full:   {name:'Full bleed', photo:[0,0,1,1], text:[.035,.025,.93,.95]},
  framed: {name:'Framed photo', photo:[.095,.27,.81,.57], text:[.045,.015,.91,.97]},
@@ -137,6 +141,10 @@ function corrected(img,s){if(s.look==='Original'&&!s.exposure&&!s.contrast)retur
  p[i]=lut[clamp(Math.round(r),0,255)];p[i+1]=lut[clamp(Math.round(g),0,255)];p[i+2]=lut[clamp(Math.round(b),0,255)]}
  ctx.putImageData(data,0,0);processed.clear();processed.set(key,c);return c
 }
+function overlaySize(o,w){const im=resolved.get(o.media);return im?{dw:o.w*w,dh:o.w*w*im.height/im.width}:null}
+function drawOverlays(ctx,w,h){for(const o of [...state.images].reverse()){const im=resolved.get(o.media),sz=o.visible&&overlaySize(o,w);if(!sz)continue;
+   ctx.save();ctx.globalAlpha=(o.opacity??100)/100;ctx.imageSmoothingQuality='high';ctx.translate(o.x*w,o.y*h);ctx.rotate((o.rotation||0)*Math.PI/180);if(o.mirror)ctx.scale(-1,1);ctx.drawImage(im,-sz.dw/2,-sz.dh/2,sz.dw,sz.dh);ctx.restore()}}
+function overlayHit(o,x,y,cv){const sz=overlaySize(o,cv.width);if(!sz)return false;const cx=o.x*cv.width,cy=o.y*cv.height,r=-(o.rotation||0)*Math.PI/180,dx=x-cx,dy=y-cy,px=dx*Math.cos(r)-dy*Math.sin(r),py=dx*Math.sin(r)+dy*Math.cos(r);return Math.abs(px)<=sz.dw/2&&Math.abs(py)<=sz.dh/2}
 function paint(canvas,img,target,w,h,layout=state.layout,layers=state.text) {
  canvas.width=w; canvas.height=h;
  const ctx=canvas.getContext('2d',{alpha:false,colorSpace:'srgb'});
@@ -158,17 +166,20 @@ function paint(canvas,img,target,w,h,layout=state.layout,layers=state.text) {
    ctx.drawImage(maskedPhoto(img,corrected(img,s),s.mask),-img.width/2,-img.height/2);
    ctx.restore();
  }
- if (!target.noText) for (const t of [...layers].reverse()) {
-   if (t.visible) drawType(ctx,t,target,w,h,layout);
+ if (!target.noText) {
+   drawOverlays(ctx,w,h);
+   for (const t of [...layers].reverse()) {
+     if (t.visible) drawType(ctx,t,target,w,h,layout);
+   }
  }
 }
 function listeningPreview(canvas,img) {
  paint(canvas,img,targets.spotify,192,192);
 }
 async function redraw(){const token=++lastImageToken;try{const img=await loadImg(state.photo);await preloadText();if(token!==lastImageToken)return;const target=targets[state.format],rect=$('artwrap').getBoundingClientRect(),w=Math.max(1,Math.min(1600,Math.round(rect.width*(devicePixelRatio||1)))),h=Math.round(w*target.h/target.w);paint($('canvas'),img,target,w,h);updateSelection();listeningPreview($('listening'),img);const info=$('source-dims');if(info)info.textContent=img.width+' × '+img.height+' px'}catch(e){if(token===lastImageToken)toast(e.message)}}
-function gallery(){const parent=$('gallery');parent.innerHTML=Array.from(media,([id,m])=>'<button class="tile '+(id===state.photo?'active':'')+'" data-id="'+id+'" aria-pressed="'+(id===state.photo)+'"><span class="thumb"><img alt="" src="'+m.src+'">'+(id===state.photo?'<span class="tick">'+icon('check')+'</span>':'')+'</span>'+esc(m.name)+'</button>').join('');$('libcount').textContent=String(media.size).padStart(2,'0');parent.querySelectorAll('button').forEach(b=>b.onclick=()=>change(()=>{if(state.photo!==b.dataset.id){state.photo=b.dataset.id;state.photoStyle={...defaults}}state.selected='image'}))}
-function layerList(){const rows=[...state.text.map(t=>({id:t.id,label:t.value||'Empty text',visible:t.visible})),{id:'image',label:'Background',visible:state.photoStyle.visible}];$('layers').innerHTML=rows.map(t=>'<div class="layer '+(state.selected===t.id?'selected ':'')+(t.visible?'':'off')+'"><button class="layer-main" data-id="'+t.id+'"><span class="layer-icon">'+(t.id==='image'?'<img src="'+media.get(state.photo).src+'" alt="">':icon('type'))+'</span><span>'+esc(t.label)+'</span></button><button class="iconbtn visibility" data-id="'+t.id+'" aria-label="'+(t.visible?'Hide ':'Show ')+esc(t.label)+'">'+icon(t.visible?'eye':'eyeoff')+'</button></div>').join('');
- $('layers').querySelectorAll('.layer-main').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;sync();saveSoon()});$('layers').querySelectorAll('.visibility').forEach(b=>b.onclick=()=>change(()=>{const obj=b.dataset.id==='image'?state.photoStyle:state.text.find(t=>t.id===b.dataset.id);obj.visible=!obj.visible}))}
+function gallery(){const parent=$('gallery');parent.innerHTML=Array.from(media,([id,m])=>'<div class="tilewrap"><button class="tile '+(id===state.photo?'active':'')+'" data-id="'+id+'" aria-pressed="'+(id===state.photo)+'"><span class="thumb"><img alt="" src="'+m.src+'">'+(id===state.photo?'<span class="tick">'+icon('check')+'</span>':'')+'</span>'+esc(m.name)+'</button><button class="tile-add" data-add="'+id+'" title="Add as image layer" aria-label="Add '+esc(m.name)+' as image layer">'+icon('plus')+'</button></div>').join('');$('libcount').textContent=String(media.size).padStart(2,'0');parent.querySelectorAll('.tile-add').forEach(b=>b.onclick=()=>addOverlay(b.dataset.add));parent.querySelectorAll('.tile').forEach(b=>b.onclick=()=>change(()=>{if(state.photo!==b.dataset.id){state.photo=b.dataset.id;state.photoStyle={...defaults}}state.selected='image'}))}
+function layerList(){const rows=[...state.text.map(t=>({id:t.id,label:t.value||'Empty text',visible:t.visible})),...state.images.map(o=>({id:o.id,label:media.get(o.media)?.name||'Image layer',visible:o.visible,thumb:media.get(o.media)?.src})),{id:'image',label:'Background',visible:state.photoStyle.visible}];$('layers').innerHTML=rows.map(t=>'<div class="layer '+(state.selected===t.id?'selected ':'')+(t.visible?'':'off')+'"><button class="layer-main" data-id="'+t.id+'"><span class="layer-icon">'+(t.id==='image'||t.thumb?'<img src="'+(t.thumb||media.get(state.photo).src)+'" alt="">':icon('type'))+'</span><span>'+esc(t.label)+'</span></button><button class="iconbtn visibility" data-id="'+t.id+'" aria-label="'+(t.visible?'Hide ':'Show ')+esc(t.label)+'">'+icon(t.visible?'eye':'eyeoff')+'</button></div>').join('');
+ $('layers').querySelectorAll('.layer-main').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;sync();saveSoon()});$('layers').querySelectorAll('.visibility').forEach(b=>b.onclick=()=>change(()=>{const obj=b.dataset.id==='image'?state.photoStyle:state.text.find(t=>t.id===b.dataset.id)||state.images.find(o=>o.id===b.dataset.id);obj.visible=!obj.visible}))}
 function segment(values,active,key){return '<div class="seg">'+values.map(([v,title,ic,label])=>'<button data-key="'+key+'" data-value="'+v+'" class="'+(v===active?'on':'')+'" aria-pressed="'+(v===active)+'" aria-label="'+title+'" title="'+title+'">'+(ic?icon(ic):'')+(label??(key==='align'?'':title))+'</button>').join('')+'</div>'}
 function slider(k,l,min,max,value,suffix=''){return '<div class="fieldrow"><label class="labelrow compact" for="'+k+'">'+l+'<output class="value" id="'+k+'val">'+value+suffix+'</output></label><input type="range" id="'+k+'" min="'+min+'" max="'+max+'" value="'+value+'" style="--fill:'+((value-min)/(max-min)*100)+'%"></div>'}
 function compositeControls(style) {
@@ -210,11 +221,17 @@ function highlightControls(t){
  return '<div class="group"><label class="mask-check"><input id="bgbox" type="checkbox" '+(t.bg?'checked':'')+'>Highlight box</label>'+(t.bg?'<label class="fieldrow stack field">Box colour<input class="paint-chip" id="bgcolor" type="color" value="'+(t.bgColor||'#151513')+'"></label>'+slider('bgpad','Padding',0,100,t.bgPad??30,'%')+slider('bgradius','Corner radius',0,100,t.bgRadius??20,'%'):'')+'</div>';
 }
 function layerActions(t){
- const i=state.text.indexOf(t);
- return '<div class="group"><h3>Layer</h3><div class="row"><button class="softbtn" id="dupe">'+icon('copy')+'Duplicate</button><button class="softbtn" id="forward" '+(i===0?'disabled':'')+' aria-label="Bring forward">'+icon('up')+'Forward</button><button class="softbtn" id="backward" '+(i===state.text.length-1?'disabled':'')+' aria-label="Send backward">'+icon('down')+'Back</button></div></div>';
+ const arr=layerArray(t),i=arr.indexOf(t);
+ return '<div class="group"><h3>Layer</h3><div class="row"><button class="softbtn" id="dupe">'+icon('copy')+'Duplicate</button><button class="softbtn" id="forward" '+(i===0?'disabled':'')+' aria-label="Bring forward">'+icon('up')+'Forward</button><button class="softbtn" id="backward" '+(i===arr.length-1?'disabled':'')+' aria-label="Send backward">'+icon('down')+'Back</button></div></div>';
 }
 function presetControls(){
  return '<div class="group"><h3>Text styles</h3><div class="presetgrid">'+textPresets.map((p,i)=>'<button class="preset" data-preset="'+i+'" style="font-family:\''+p.font+'\';font-style:'+(p.italic?'italic':'normal')+';font-weight:'+(p.bold?700:400)+'">'+(p.textCase==='upper'?'AB':p.textCase==='lower'?'ab':'Ab')+'<small>'+p.name+'</small></button>').join('')+'</div></div>';
+}
+function overlayTools(o){const m=media.get(o.media);
+ return '<div class="group"><h3>Image layer</h3><div class="file-info"><img src="'+m.src+'" alt=""><div><b>'+esc(m.name)+'</b></div></div></div>'
+  +'<div class="group">'+slider('ovsize','Size',2,200,Math.round(o.w*100),'%')+slider('ovrotation','Rotation',-180,180,Math.round(o.rotation||0),'°')+slider('ovopacity','Opacity',0,100,o.opacity??100,'%')
+  +'<div class="row fieldrow"><button class="softbtn" id="ovflip" aria-pressed="'+!!o.mirror+'">'+icon('flip')+'Flip</button><button class="softbtn" id="ovcenter">Centre</button></div></div>'
+  +layerActions(o)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove image layer</button></div>';
 }
 function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+presetControls()+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+typographyControls(t)+highlightControls(t)+outlineControls(t)+shadowControls(t)+layerActions(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
 function continuous(el,apply){let before=null;el.addEventListener('input',()=>{before??=snap();apply();redraw();saveSoon()});el.addEventListener('change',()=>{checkpoint(before);before=null});}
@@ -226,8 +243,12 @@ function bindRange(id, suffix, setValue) {
    el.style.setProperty('--fill', (el.value-el.min)/(el.max-el.min)*100+'%');
  });
 }
-function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.toggle('on',!t);$('typetab').classList.toggle('on',!!t);$('imgtab').setAttribute('aria-pressed',!t);$('typetab').setAttribute('aria-pressed',!!t);$('controls').innerHTML=t?textTools(t):imageTools();
+function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.toggle('on',!t);$('typetab').classList.toggle('on',!!t);$('imgtab').setAttribute('aria-pressed',!t);$('typetab').setAttribute('aria-pressed',!!t);const ov=selectedOverlay();$('controls').innerHTML=t?textTools(t):ov?overlayTools(ov):imageTools();
  $('controls').querySelectorAll('[data-key]').forEach(b=>b.onclick=()=>change(()=>{(t||s)[b.dataset.key]=b.dataset.value;if(b.dataset.key==='fit')Object.assign(s,{panX:0,panY:0,zoom:100})}));
+ if(ov){
+ bindRange('ovsize','%',v=>ov.w=v/100);bindRange('ovrotation','°',v=>ov.rotation=v);bindRange('ovopacity','%',v=>ov.opacity=v);
+ $('ovflip').onclick=()=>change(()=>ov.mirror=!ov.mirror);$('ovcenter').onclick=()=>change(()=>{ov.x=ov.y=.5});
+ $('dupe').onclick=duplicateText;$('forward').onclick=()=>moveText(-1);$('backward').onclick=()=>moveText(1);$('removetext').onclick=removeText;return}
  if(!t){
  continuous($('canvasfill'),()=>state.fillColor=$('canvasfill').value);
  $('editmask').onclick=async()=>{const id=state.photo;try{const img=await loadImg(id);if(id===state.photo)openMaskEditor(img)}catch{toast('Could not open the image for masking.')}};
@@ -263,21 +284,27 @@ function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.
  $('controls').querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>change(()=>{const {name,...p}=textPresets[b.dataset.preset];for(const k of ['outline','bg','underline','strike'])t[k]=false;delete t.shadowAdjustments;Object.assign(t,p)}));
  lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=removeText
 }
-function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=[a.y,1-a.x-a.w,1-a.y-a.h,a.x].map(v=>Math.max(0,v)*100+'%').join(' ');$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
-function duplicateText(){const t=selected();if(!t)return;change(()=>{const c=structuredClone(t);c.id=crypto.randomUUID();c.role='text';c.x=clamp(t.x+.03,0,1);c.y=clamp(t.y+.03,0,1);state.text.splice(state.text.indexOf(t),0,c);state.selected=c.id})}
-function moveText(dir){const t=selected();if(!t)return;const i=state.text.indexOf(t),j=i+dir;if(j<0||j>=state.text.length)return;change(()=>{state.text.splice(i,1);state.text.splice(j,0,t)})}
-function removeText(){const t=selected();if(!t)return;change(()=>{state.text=state.text.filter(l=>l!==t);state.selected=state.text[0]?.id||'image'})}
-function updateSelection(){const box=$('selbox'),t=selected(),tgt=targets[state.format],cv=$('canvas');
- if(!t||!t.visible||!t.value||tgt.noText||!cv.width){box.hidden=true;return}
- const b=layoutText(cv.getContext('2d'),t,tgt,cv.width,cv.height),k=cv.clientWidth/cv.width,p=t.bg?b.size*(t.bgPad??30)/100:0;
- box.hidden=false;Object.assign(box.style,{left:(b.x-p)*k+'px',top:(b.y-p)*k+'px',width:(b.width+2*p)*k+'px',height:(b.height+2*p)*k+'px',transform:'rotate('+(t.rotation||0)+'deg)'})}
+function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=[a.y,1-a.x-a.w,1-a.y-a.h,a.x].map(v=>Math.max(0,v)*100+'%').join(' ');$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':selectedOverlay()?'Drag image to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
+function duplicateText(){const t=selLayer();if(!t)return;change(()=>{const arr=layerArray(t),c=structuredClone(t);c.id=crypto.randomUUID();if(arr===state.text)c.role='text';c.x=clamp(t.x+.03,0,1);c.y=clamp(t.y+.03,0,1);arr.splice(arr.indexOf(t),0,c);state.selected=c.id})}
+function moveText(dir){const t=selLayer();if(!t)return;const arr=layerArray(t),i=arr.indexOf(t),j=i+dir;if(j<0||j>=arr.length)return;change(()=>{arr.splice(i,1);arr.splice(j,0,t)})}
+function removeText(){const t=selLayer();if(!t)return;change(()=>{const arr=layerArray(t);arr.splice(arr.indexOf(t),1);state.selected=state.text[0]?.id||state.images[0]?.id||'image'})}
+function addOverlay(mediaId){loadImg(mediaId).then(im=>{const tgt=targets[state.format],w=Math.min(.5,.5*(tgt.h/tgt.w)*(im.width/im.height));
+ change(()=>{const o={id:crypto.randomUUID(),media:mediaId,x:.5,y:.5,w,rotation:0,opacity:100,mirror:false,visible:true};state.images.unshift(o);state.selected=o.id})}).catch(()=>toast('Could not open this image.'))}
+function updateSelection(){const box=$('selbox'),t=selected(),o=selectedOverlay(),tgt=targets[state.format],cv=$('canvas');
+ if(tgt.noText||!cv.width||!(t||o)){box.hidden=true;return}
+ let L,T,W,H,rot;
+ if(t){if(!t.visible||!t.value){box.hidden=true;return}
+   const b=layoutText(cv.getContext('2d'),t,tgt,cv.width,cv.height),p=t.bg?b.size*(t.bgPad??30)/100:0;L=b.x-p;T=b.y-p;W=b.width+2*p;H=b.height+2*p;rot=t.rotation||0}
+ else{const sz=o.visible&&overlaySize(o,cv.width);if(!sz){box.hidden=true;return}L=o.x*cv.width-sz.dw/2;T=o.y*cv.height-sz.dh/2;W=sz.dw;H=sz.dh;rot=o.rotation||0}
+ const k=cv.clientWidth/cv.width;box.hidden=false;Object.assign(box.style,{left:L*k+'px',top:T*k+'px',width:W*k+'px',height:H*k+'px',transform:'rotate('+rot+'deg)'})}
 let handleOp=null;
-$('selbox').addEventListener('pointerdown',e=>{const h=e.target.closest('[data-h]'),t=selected();if(!h||!t||e.button!==0)return;e.preventDefault();e.stopPropagation();
+$('selbox').addEventListener('pointerdown',e=>{const h=e.target.closest('[data-h]'),t=selLayer();if(!h||!t||e.button!==0)return;e.preventDefault();e.stopPropagation();
  const r=$('selbox').getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;h.setPointerCapture(e.pointerId);
- handleOp={mode:h.dataset.h,id:e.pointerId,before:snap(),cx,cy,d0:Math.max(1,Math.hypot(e.clientX-cx,e.clientY-cy)),size:t.size}});
-$('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const t=selected();if(!t)return;const dx=e.clientX-handleOp.cx,dy=e.clientY-handleOp.cy;
- if(handleOp.mode==='rotate'){let a=Math.atan2(dy,dx)*180/Math.PI+90;a=((a+540)%360)-180;const near=Math.round(a/45)*45;a=e.shiftKey?Math.round(a/15)*15:Math.abs(a-near)<3?near:a;t.rotation=Math.round(a);if($('txrotation')){$('txrotation').value=t.rotation;$('txrotationval').textContent=t.rotation+'°';$('txrotation').style.setProperty('--fill',(t.rotation+180)/360*100+'%')}}
- else{t.size=clamp(Math.round(handleOp.size*Math.hypot(dx,dy)/handleOp.d0*10)/10,1,80);if($('size'))$('size').value=t.size}
+ handleOp={mode:h.dataset.h,id:e.pointerId,before:snap(),cx,cy,d0:Math.max(1,Math.hypot(e.clientX-cx,e.clientY-cy)),size:t.size??t.w}});
+$('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const t=selLayer();if(!t)return;const isText=!!selected();const dx=e.clientX-handleOp.cx,dy=e.clientY-handleOp.cy;
+ if(handleOp.mode==='rotate'){let a=Math.atan2(dy,dx)*180/Math.PI+90;a=((a+540)%360)-180;const near=Math.round(a/45)*45;a=e.shiftKey?Math.round(a/15)*15:Math.abs(a-near)<3?near:a;t.rotation=Math.round(a);const rid=isText?'txrotation':'ovrotation';if($(rid)){$(rid).value=t.rotation;$(rid+'val').textContent=t.rotation+'°';$(rid).style.setProperty('--fill',(t.rotation+180)/360*100+'%')}}
+ else if(isText){t.size=clamp(Math.round(handleOp.size*Math.hypot(dx,dy)/handleOp.d0*10)/10,1,80);if($('size'))$('size').value=t.size}
+ else{t.w=clamp(handleOp.size*Math.hypot(dx,dy)/handleOp.d0,.02,2)}
  redraw()});
 const endHandle=e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const before=handleOp.before;handleOp=null;checkpoint(before);sync()};
 $('selbox').addEventListener('pointerup',endHandle);$('selbox').addEventListener('pointercancel',endHandle);
@@ -287,9 +314,10 @@ $('format').innerHTML=Object.entries(formats).map(([id,n])=>'<option value="'+id
 $('format').onchange=e=>change(()=>{state.format=e.target.value;if(!state.outputs.includes(state.format))state.outputs.push(state.format);if(targets[state.format].noText)state.selected='image'});
 $('project').onchange=e=>change(()=>state.name=e.target.value.trim()||'Untitled release');
 $('guidebtn').onclick=()=>{guides=!guides;sync()};
-async function uploadImage(file){if(!file)return;try{const src=await fileData(file),id=crypto.randomUUID(),item={name:file.name.replace(/\.[^.]+$/,''),src};media.set(id,item);
+async function uploadImage(file,asLayer=false){if(!file)return;try{const src=await fileData(file),id=crypto.randomUUID(),item={name:file.name.replace(/\.[^.]+$/,''),src};media.set(id,item);
  try{await loadImg(id)}catch(e){media.delete(id);imgs.delete(id);throw e}let stored=true;if(db)try{await dbPut('media',Array.from(media).filter(([k])=>!Object.hasOwn(builtins,k)))}catch{stored=false}
- change(()=>{state.photo=id;state.photoStyle={...defaults};state.selected='image'});toast(stored?'Image added to the library':'Image added for this session. Device storage is full.')}catch{toast('This image could not be opened. Try a JPG, PNG or WebP file.')}}
+ if(asLayer)addOverlay(id);else change(()=>{state.photo=id;state.photoStyle={...defaults};state.selected='image'});toast(stored?'Image added to the library':'Image added for this session. Device storage is full.')}catch{toast('This image could not be opened. Try a JPG, PNG or WebP file.')}}
+$('addimage').onclick=()=>$('layerfile').click();$('layerfile').onchange=e=>{uploadImage(e.target.files[0],true);e.target.value=''};
 $('upload').onclick=()=>$('imagefile').click();$('imagefile').onchange=e=>{uploadImage(e.target.files[0]);e.target.value=''};
 for(const el of [$('upload'),$('stage')]){el.ondragover=e=>{e.preventDefault();el.classList.add('drag')};el.ondragleave=()=>el.classList.remove('drag');el.ondrop=e=>{e.preventDefault();el.classList.remove('drag');uploadImage(e.dataTransfer.files[0])}}
 async function addFace(name,src){const face=new FontFace(name,'url('+src+')');await face.load();document.fonts.add(face);userFonts.set(name,src)}
@@ -298,10 +326,12 @@ $('fontfile').onchange=async e=>{const file=e.target.files[0];e.target.value='';
 const canvas=$('canvas');
 canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
  if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);let px=x,py=y;if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2,r=-t.rotation*Math.PI/180,dx=x-cx,dy=y-cy;px=cx+dx*Math.cos(r)-dy*Math.sin(r);py=cy+dx*Math.sin(r)+dy*Math.cos(r)}const p=Math.max(4,t.bg?b.size*(t.bgPad??30)/100:0);return px>=b.x-p&&px<=b.x+b.width+p&&py>=b.y-p&&py<=b.y+b.height+p});
- if(!hit&&!photoFrame(tgt,canvas.width,canvas.height))return;
- state.selected=hit?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:hit?.x??state.photoStyle.panX,oy:hit?.y??state.photoStyle.panY,img,rect};sync()};
-canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),target=targets[state.format];
- if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
+ let ov;if(!hit&&!tgt.noText)ov=state.images.find(o=>o.visible&&overlayHit(o,x,y,canvas));
+ const lay=hit||ov;
+ if(!lay&&!photoFrame(tgt,canvas.width,canvas.height))return;
+ state.selected=lay?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:lay?.x??state.photoStyle.panX,oy:lay?.y??state.photoStyle.panY,img,rect};sync()};
+canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),ov=selectedOverlay(),target=targets[state.format];
+ if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else if(ov){ov.x=clamp(ox+dx/rect.width,0,1);ov.y=clamp(oy+dy/rect.height,0,1)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
 canvas.ondblclick=()=>{if(selected()&&$('copy')){$('copy').focus();$('copy').select()}};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
@@ -409,7 +439,7 @@ $('download').onclick=async()=>{if(exportBusy||!state.outputs.length)return;expo
  try{await preloadText();const files=[],base=state.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g,'-').trim().slice(0,70)||'Artwork';for(const [i,id] of state.outputs.entries()){const t=targets[id];$('exportcount').textContent='Rendering '+(i+1)+' of '+state.outputs.length+'…';await new Promise(r=>setTimeout(r,20));const c=document.createElement('canvas');paint(c,img,t,t.w,t.h);let quality=.95,blob=await asBlob(c,'image/'+(t.ext==='jpg'?'jpeg':'png'),quality);
  while(t.limit&&blob.size>t.limit&&quality>.35){quality-=.1;blob=await asBlob(c,'image/jpeg',quality)}c.width=c.height=1;if(t.limit&&blob.size>t.limit)throw new Error('The banner exceeds the platform size limit. Try a simpler image.');files.push({blob,name:base+'-'+id+'-'+t.w+'x'+t.h+'.'+t.ext})}
  const single=files.length===1,blob=single?files[0].blob:await makeZip(files),a=$('downloadlink');preparedUrl=URL.createObjectURL(blob);a.href=preparedUrl;a.download=single?files[0].name:base+'-artwork.zip';a.hidden=false;a.textContent='Save '+a.download;a.click();$('exportcount').textContent='Export ready'}catch(e){$('exportcount').textContent=e.message||'Export failed. Please try again.'}finally{exportBusy=false;dlg.querySelectorAll('button,input').forEach(el=>el.disabled=false)}};
-document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='d'&&selected()){e.preventDefault();duplicateText()}else if(!cmd&&(k==='delete'||k==='backspace')&&selected()){e.preventDefault();removeText()}else if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
+document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='d'&&selLayer()){e.preventDefault();duplicateText()}else if(!cmd&&(k==='delete'||k==='backspace')&&selLayer()){e.preventDefault();removeText()}else if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selLayer();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
 function readProjectOnOpen() {
  const navigation = performance.getEntriesByType('navigation')[0];
  const reloaded = navigation?.type === 'reload' || performance.navigation?.type === 1;
@@ -431,6 +461,7 @@ async function start() {
    for (const [name, src] of fonts || []) await addFace(name, src);
    if (project && media.has(project.photo) && targets[project.format]) {
      state = project;
+     state.images = (state.images || []).filter(o => media.has(o.media));
      // Earlier projects stored the two starter layers at the end of the stack.
      // Added layers always went to the front. Preserve every layer and its text.
      if (state.text.length && state.text.every(layer => !layer.role)) {

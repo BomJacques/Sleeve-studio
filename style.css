@@ -74,3 +74,11 @@ dialog{width:min(470px,calc(100% - 28px));max-height:90dvh;overflow:auto;margin:
 .preset{display:grid;gap:2px;justify-items:center;padding:9px 4px 7px;border:1px solid #404143;border-radius:5px;background:#28292b;font-size:22px;line-height:1.1}
 .preset small{font:11px "DM Sans",sans-serif;color:var(--muted)}
 .seg button[aria-label]{font-size:13px}
+
+.head-btns{display:inline-flex;gap:2px}
+.tilewrap{position:relative;min-width:0}
+.tile-add{position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:#171819d9;color:#fff;opacity:0;transition:opacity .12s}
+.tile-add svg{width:12px;height:12px}
+.tilewrap:hover .tile-add,.tile-add:focus-visible{opacity:1}
+@media(hover:none){.tile-add{opacity:1}}
+.tilewrap>.tile{display:block;width:100%}
