@@ -18,7 +18,7 @@ const glyphs = {
  fill:'<path d="M3 8V3h5m8 0h5v5M3 16v5h5m8 0h5v-5M8 8h8v8H8z"/>',
  fit:'<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 8h10v8H7z"/>',
  rotate:'<path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/>', flip:'<path d="M12 2v3m0 3v3m0 3v3m0 3v2M3 6l5 12H3zm18 0-5 12h5z"/>',
- cursor:'<path d="m5 3 14 10-7 1-3 7z"/>',left:'<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',center:'<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',right:'<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',trash:'<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 9v8m4-8v8"/>'
+ cursor:'<path d="m5 3 14 10-7 1-3 7z"/>',left:'<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',center:'<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',right:'<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',trash:'<path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 9v8m4-8v8"/>',copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',up:'<path d="m6 14 6-6 6 6"/>',down:'<path d="m6 10 6 6 6-6"/>'
 };
 const icon = name => '<svg class="ic" aria-hidden="true" viewBox="0 0 24 24">'+(glyphs[name]||'')+'</svg>';
 document.querySelectorAll('[data-icon]').forEach(el=>el.outerHTML=icon(el.dataset.icon));
@@ -77,11 +77,13 @@ function area(target, layout) {
  const [x,y,w,h] = coverLayout(target, layout).text;
  return {x,y,w,h};
 }
-function layoutText(ctx,t,target,w,h,layout){const a=area(target,layout),aw=a.w*w,ah=a.h*h;const lines=(t.value||'').split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
+const textCase=t=>{const v=t.value||'';return t.textCase==='upper'?v.toUpperCase():t.textCase==='lower'?v.toLowerCase():t.textCase==='title'?v.toLowerCase().replace(/(^|[\s\-(])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase()):v};
+const leadOf=t=>t.leading??1.12;
+function layoutText(ctx,t,target,w,h,layout){const a=area(target,layout),aw=a.w*w,ah=a.h*h;const lines=textCase(t).split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
  const measure=line=>ctx.measureText(line).width+Math.max(0,Array.from(line).length-1)*size*t.tracking;
- let width=Math.max(1,...lines.map(measure)),height=size*1.12*lines.length;
- const strokePad=t.outline?size*(t.outlineWidth??4)/100:0;
- const scale=Math.min(1,aw/(width+2*strokePad),ah/(height+2*strokePad));size*=scale;ctx.font=cssFont(t,size);width=Math.max(1,...lines.map(measure));height=size*1.12*lines.length;
+ let width=Math.max(1,...lines.map(measure)),height=size*leadOf(t)*lines.length;
+ const strokePad=Math.max(t.outline?size*(t.outlineWidth??4)/100:0,t.bg?size*(t.bgPad??30)/100:0);
+ const scale=Math.min(1,aw/(width+2*strokePad),ah/(height+2*strokePad));size*=scale;ctx.font=cssFont(t,size);width=Math.max(1,...lines.map(measure));height=size*leadOf(t)*lines.length;
  const pad=strokePad*scale;
  const x=clamp(a.x*w+t.x*aw-width/2,a.x*w+pad,(a.x+a.w)*w-width-pad),y=clamp(a.y*h+t.y*ah-height/2,a.y*h+pad,(a.y+a.h)*h-height-pad);
  return {lines,size,x,y,width,height,measure}
@@ -94,7 +96,12 @@ function shadowSettings(layer) {
  const preset = shadowPresets[layer.shadow];
  return preset && {...preset, ...layer.shadowAdjustments?.[layer.shadow]};
 }
-function drawType(ctx,t,target,w,h,layout){const b=layoutText(ctx,t,target,w,h,layout);ctx.save();ctx.fillStyle=t.color;ctx.textBaseline='middle';
+function drawType(ctx,t,target,w,h,layout){const b=layoutText(ctx,t,target,w,h,layout);ctx.save();
+ if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2;ctx.translate(cx,cy);ctx.rotate(t.rotation*Math.PI/180);ctx.translate(-cx,-cy)}
+ ctx.globalAlpha=(t.opacity??100)/100;
+ if(t.bg){const pad=b.size*(t.bgPad??30)/100,bw=b.width+pad*2,bh=b.height+pad*2,r=Math.min(bw,bh)/2*(t.bgRadius??20)/100;
+   ctx.fillStyle=t.bgColor||'#151513';ctx.beginPath();ctx.roundRect(b.x-pad,b.y-pad,bw,bh,r);ctx.fill()}
+ ctx.fillStyle=t.color;ctx.textBaseline='middle';
  const shadow = shadowSettings(t);
  if (shadow) {
    const radians = shadow.angle * Math.PI / 180;
@@ -113,7 +120,11 @@ function drawType(ctx,t,target,w,h,layout){const b=layoutText(ctx,t,target,w,h,l
    if(t.outline)ctx.strokeText(text,x,y);
    ctx.fillText(text,x,y);
  }
- b.lines.forEach((line,i)=>{const lineW=b.measure(line),start=b.x+(t.align==='center'?(b.width-lineW)/2:t.align==='right'?b.width-lineW:0),y=b.y+(i+.5)*b.size*1.12;if(!t.tracking){drawRun(line,start,y);return}let x=start;for(const c of line){drawRun(c,x,y);x+=ctx.measureText(c).width+t.tracking*b.size}});ctx.restore();return b}
+ const lead=leadOf(t);
+ b.lines.forEach((line,i)=>{const lineW=b.measure(line),start=b.x+(t.align==='center'?(b.width-lineW)/2:t.align==='right'?b.width-lineW:0),y=b.y+(i+.5)*b.size*lead;
+   if(!t.tracking)drawRun(line,start,y);else{let x=start;for(const c of line){drawRun(c,x,y);x+=ctx.measureText(c).width+t.tracking*b.size}}
+   if((t.underline||t.strike)&&line.trim()){const th=Math.max(1,b.size*.065);if(t.underline)ctx.fillRect(start,y+b.size*.33,lineW,th);if(t.strike)ctx.fillRect(start,y-th/2,lineW,th)}
+ });ctx.restore();return b}
 function geometry(img,s,w,h){const rotated=s.rotation%180!==0,iw=rotated?img.height:img.width,ih=rotated?img.width:img.height;
  const scale=(s.fit==='Fit'?Math.min(w/iw,h/ih):Math.max(w/iw,h/ih))*s.zoom/100;
  return {scale,rangeX:Math.abs(iw*scale-w)/2,rangeY:Math.abs(ih*scale-h)/2}
@@ -154,11 +165,11 @@ function paint(canvas,img,target,w,h,layout=state.layout,layers=state.text) {
 function listeningPreview(canvas,img) {
  paint(canvas,img,targets.spotify,192,192);
 }
-async function redraw(){const token=++lastImageToken;try{const img=await loadImg(state.photo);await preloadText();if(token!==lastImageToken)return;const target=targets[state.format],rect=$('artwrap').getBoundingClientRect(),w=Math.max(1,Math.min(1600,Math.round(rect.width*(devicePixelRatio||1)))),h=Math.round(w*target.h/target.w);paint($('canvas'),img,target,w,h);listeningPreview($('listening'),img);const info=$('source-dims');if(info)info.textContent=img.width+' × '+img.height+' px'}catch(e){if(token===lastImageToken)toast(e.message)}}
+async function redraw(){const token=++lastImageToken;try{const img=await loadImg(state.photo);await preloadText();if(token!==lastImageToken)return;const target=targets[state.format],rect=$('artwrap').getBoundingClientRect(),w=Math.max(1,Math.min(1600,Math.round(rect.width*(devicePixelRatio||1)))),h=Math.round(w*target.h/target.w);paint($('canvas'),img,target,w,h);updateSelection();listeningPreview($('listening'),img);const info=$('source-dims');if(info)info.textContent=img.width+' × '+img.height+' px'}catch(e){if(token===lastImageToken)toast(e.message)}}
 function gallery(){const parent=$('gallery');parent.innerHTML=Array.from(media,([id,m])=>'<button class="tile '+(id===state.photo?'active':'')+'" data-id="'+id+'" aria-pressed="'+(id===state.photo)+'"><span class="thumb"><img alt="" src="'+m.src+'">'+(id===state.photo?'<span class="tick">'+icon('check')+'</span>':'')+'</span>'+esc(m.name)+'</button>').join('');$('libcount').textContent=String(media.size).padStart(2,'0');parent.querySelectorAll('button').forEach(b=>b.onclick=()=>change(()=>{if(state.photo!==b.dataset.id){state.photo=b.dataset.id;state.photoStyle={...defaults}}state.selected='image'}))}
 function layerList(){const rows=[...state.text.map(t=>({id:t.id,label:t.value||'Empty text',visible:t.visible})),{id:'image',label:'Background',visible:state.photoStyle.visible}];$('layers').innerHTML=rows.map(t=>'<div class="layer '+(state.selected===t.id?'selected ':'')+(t.visible?'':'off')+'"><button class="layer-main" data-id="'+t.id+'"><span class="layer-icon">'+(t.id==='image'?'<img src="'+media.get(state.photo).src+'" alt="">':icon('type'))+'</span><span>'+esc(t.label)+'</span></button><button class="iconbtn visibility" data-id="'+t.id+'" aria-label="'+(t.visible?'Hide ':'Show ')+esc(t.label)+'">'+icon(t.visible?'eye':'eyeoff')+'</button></div>').join('');
  $('layers').querySelectorAll('.layer-main').forEach(b=>b.onclick=()=>{state.selected=b.dataset.id;sync();saveSoon()});$('layers').querySelectorAll('.visibility').forEach(b=>b.onclick=()=>change(()=>{const obj=b.dataset.id==='image'?state.photoStyle:state.text.find(t=>t.id===b.dataset.id);obj.visible=!obj.visible}))}
-function segment(values,active,key){return '<div class="seg">'+values.map(([v,title,ic])=>'<button data-key="'+key+'" data-value="'+v+'" class="'+(v===active?'on':'')+'" aria-pressed="'+(v===active)+'" aria-label="'+title+'">'+(ic?icon(ic):'')+(key==='align'?'':title)+'</button>').join('')+'</div>'}
+function segment(values,active,key){return '<div class="seg">'+values.map(([v,title,ic,label])=>'<button data-key="'+key+'" data-value="'+v+'" class="'+(v===active?'on':'')+'" aria-pressed="'+(v===active)+'" aria-label="'+title+'" title="'+title+'">'+(ic?icon(ic):'')+(label??(key==='align'?'':title))+'</button>').join('')+'</div>'}
 function slider(k,l,min,max,value,suffix=''){return '<div class="fieldrow"><label class="labelrow compact" for="'+k+'">'+l+'<output class="value" id="'+k+'val">'+value+suffix+'</output></label><input type="range" id="'+k+'" min="'+min+'" max="'+max+'" value="'+value+'" style="--fill:'+((value-min)/(max-min)*100)+'%"></div>'}
 function compositeControls(style) {
  return '<div class="group">'+slider('opacity','Image opacity',0,100,style.opacity??100,'%')+'<label class="fieldrow stack field">Canvas fill<input id="canvasfill" class="paint-chip" type="color" value="'+(state.fillColor||'#151513')+'"></label><div class="row fieldrow"><button class="softbtn" id="editmask">'+(style.mask?'Edit mask':'Object mask')+'</button>'+(style.mask?'<button class="softbtn" id="clearmask">Remove mask</button>':'')+'</div></div>';
@@ -181,7 +192,31 @@ function shadowControls(layer) {
  }
  return '<div class="group"><label class="field" for="shadow">Drop shadow</label><select id="shadow">'+options+'</select>'+fields+'</div>';
 }
-function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+outlineControls(t)+shadowControls(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
+const textPresets=[
+ {name:'Clean',font:'DM Sans',bold:true,italic:false,textCase:'none',tracking:0,leading:1.1,color:'#fff6df',outline:false,bg:false,shadow:'Off',underline:false},
+ {name:'Poster',font:'Archivo Black',bold:false,italic:false,textCase:'upper',tracking:.02,leading:.95,color:'#ffffff',outline:false,bg:false,shadow:'Deep',underline:false},
+ {name:'Editorial',font:'Playfair Display',bold:false,italic:true,textCase:'none',tracking:0,leading:1.05,color:'#fff6df',outline:false,bg:false,shadow:'Off',underline:false},
+ {name:'Retro',font:'Young Serif',bold:false,italic:false,textCase:'upper',tracking:.04,leading:1.05,color:'#ffd9a0',outline:true,outlineColor:'#8a2d12',outlineWidth:5,outlineJoin:'round',bg:false,shadow:'Soft',underline:false},
+ {name:'Label',font:'Space Mono',bold:true,italic:false,textCase:'upper',tracking:.12,leading:1.2,color:'#151513',outline:false,bg:true,bgColor:'#fff6df',bgPad:35,bgRadius:12,shadow:'Off',underline:false},
+ {name:'Tech',font:'Space Grotesk',bold:true,italic:false,textCase:'lower',tracking:-.02,leading:1.05,color:'#ff895e',outline:false,bg:false,shadow:'Off',underline:false}
+];
+function typographyControls(t){
+ return '<div class="group"><h3>Spacing &amp; case</h3>'+slider('txtracking','Letter spacing',-10,100,Math.round((t.tracking||0)*100),'%')+slider('txleading','Line spacing',70,220,Math.round(leadOf(t)*100),'%')
+  +'<div class="fieldrow"><div class="labelrow">Letter case</div>'+segment([['none','Original case','','Aa'],['upper','Uppercase','','AA'],['lower','Lowercase','','aa'],['title','Title case','','Ab']],t.textCase||'none','textCase')+'</div>'
+  +'<div class="row fieldrow"><button class="softbtn" id="underline" aria-pressed="'+!!t.underline+'"><u>U</u> Underline</button><button class="softbtn" id="strike" aria-pressed="'+!!t.strike+'"><s>S</s> Strike</button></div></div>'
+  +'<div class="group"><h3>Transform</h3>'+slider('txrotation','Rotation',-180,180,Math.round(t.rotation||0),'°')+slider('txopacity','Opacity',0,100,t.opacity??100,'%')+'</div>';
+}
+function highlightControls(t){
+ return '<div class="group"><label class="mask-check"><input id="bgbox" type="checkbox" '+(t.bg?'checked':'')+'>Highlight box</label>'+(t.bg?'<label class="fieldrow stack field">Box colour<input class="paint-chip" id="bgcolor" type="color" value="'+(t.bgColor||'#151513')+'"></label>'+slider('bgpad','Padding',0,100,t.bgPad??30,'%')+slider('bgradius','Corner radius',0,100,t.bgRadius??20,'%'):'')+'</div>';
+}
+function layerActions(t){
+ const i=state.text.indexOf(t);
+ return '<div class="group"><h3>Layer</h3><div class="row"><button class="softbtn" id="dupe">'+icon('copy')+'Duplicate</button><button class="softbtn" id="forward" '+(i===0?'disabled':'')+' aria-label="Bring forward">'+icon('up')+'Forward</button><button class="softbtn" id="backward" '+(i===state.text.length-1?'disabled':'')+' aria-label="Send backward">'+icon('down')+'Back</button></div></div>';
+}
+function presetControls(){
+ return '<div class="group"><h3>Text styles</h3><div class="presetgrid">'+textPresets.map((p,i)=>'<button class="preset" data-preset="'+i+'" style="font-family:\''+p.font+'\';font-style:'+(p.italic?'italic':'normal')+';font-weight:'+(p.bold?700:400)+'">'+(p.textCase==='upper'?'AB':p.textCase==='lower'?'ab':'Ab')+'<small>'+p.name+'</small></button>').join('')+'</div></div>';
+}
+function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+presetControls()+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+typographyControls(t)+highlightControls(t)+outlineControls(t)+shadowControls(t)+layerActions(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
 function continuous(el,apply){let before=null;el.addEventListener('input',()=>{before??=snap();apply();redraw();saveSoon()});el.addEventListener('change',()=>{checkpoint(before);before=null});}
 function bindRange(id, suffix, setValue) {
  const el = $(id);
@@ -220,9 +255,32 @@ function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.
    $('outlinejoin').onchange=e=>change(()=>t.outlineJoin=e.target.value);
    continuous($('outlinecolor'),()=>t.outlineColor=$('outlinecolor').value);
  }
- lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=()=>change(()=>{state.text=state.text.filter(l=>l!==t);state.selected=state.text[0]?.id||'image'})
+ bindRange('txtracking','%',v=>t.tracking=v/100);bindRange('txleading','%',v=>t.leading=v/100);bindRange('txrotation','°',v=>t.rotation=v);bindRange('txopacity','%',v=>t.opacity=v);
+ $('underline').onclick=()=>change(()=>t.underline=!t.underline);$('strike').onclick=()=>change(()=>t.strike=!t.strike);
+ $('bgbox').onchange=e=>change(()=>t.bg=e.target.checked);
+ if(t.bg){continuous($('bgcolor'),()=>t.bgColor=$('bgcolor').value);bindRange('bgpad','%',v=>t.bgPad=v);bindRange('bgradius','%',v=>t.bgRadius=v)}
+ $('dupe').onclick=()=>duplicateText();$('forward').onclick=()=>moveText(-1);$('backward').onclick=()=>moveText(1);
+ $('controls').querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>change(()=>{const {name,...p}=textPresets[b.dataset.preset];for(const k of ['outline','bg','underline','strike'])t[k]=false;delete t.shadowAdjustments;Object.assign(t,p)}));
+ lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=removeText
 }
 function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=[a.y,1-a.x-a.w,1-a.y-a.h,a.x].map(v=>Math.max(0,v)*100+'%').join(' ');$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
+function duplicateText(){const t=selected();if(!t)return;change(()=>{const c=structuredClone(t);c.id=crypto.randomUUID();c.role='text';c.x=clamp(t.x+.03,0,1);c.y=clamp(t.y+.03,0,1);state.text.splice(state.text.indexOf(t),0,c);state.selected=c.id})}
+function moveText(dir){const t=selected();if(!t)return;const i=state.text.indexOf(t),j=i+dir;if(j<0||j>=state.text.length)return;change(()=>{state.text.splice(i,1);state.text.splice(j,0,t)})}
+function removeText(){const t=selected();if(!t)return;change(()=>{state.text=state.text.filter(l=>l!==t);state.selected=state.text[0]?.id||'image'})}
+function updateSelection(){const box=$('selbox'),t=selected(),tgt=targets[state.format],cv=$('canvas');
+ if(!t||!t.visible||!t.value||tgt.noText||!cv.width){box.hidden=true;return}
+ const b=layoutText(cv.getContext('2d'),t,tgt,cv.width,cv.height),k=cv.clientWidth/cv.width,p=t.bg?b.size*(t.bgPad??30)/100:0;
+ box.hidden=false;Object.assign(box.style,{left:(b.x-p)*k+'px',top:(b.y-p)*k+'px',width:(b.width+2*p)*k+'px',height:(b.height+2*p)*k+'px',transform:'rotate('+(t.rotation||0)+'deg)'})}
+let handleOp=null;
+$('selbox').addEventListener('pointerdown',e=>{const h=e.target.closest('[data-h]'),t=selected();if(!h||!t||e.button!==0)return;e.preventDefault();e.stopPropagation();
+ const r=$('selbox').getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;h.setPointerCapture(e.pointerId);
+ handleOp={mode:h.dataset.h,id:e.pointerId,before:snap(),cx,cy,d0:Math.max(1,Math.hypot(e.clientX-cx,e.clientY-cy)),size:t.size}});
+$('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const t=selected();if(!t)return;const dx=e.clientX-handleOp.cx,dy=e.clientY-handleOp.cy;
+ if(handleOp.mode==='rotate'){let a=Math.atan2(dy,dx)*180/Math.PI+90;a=((a+540)%360)-180;const near=Math.round(a/45)*45;a=e.shiftKey?Math.round(a/15)*15:Math.abs(a-near)<3?near:a;t.rotation=Math.round(a);if($('txrotation')){$('txrotation').value=t.rotation;$('txrotationval').textContent=t.rotation+'°';$('txrotation').style.setProperty('--fill',(t.rotation+180)/360*100+'%')}}
+ else{t.size=clamp(Math.round(handleOp.size*Math.hypot(dx,dy)/handleOp.d0*10)/10,1,80);if($('size'))$('size').value=t.size}
+ redraw()});
+const endHandle=e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const before=handleOp.before;handleOp=null;checkpoint(before);sync()};
+$('selbox').addEventListener('pointerup',endHandle);$('selbox').addEventListener('pointercancel',endHandle);
 function addText(){change(()=>{const t=textLayer();state.text.unshift(t);state.selected=t.id});$('copy').focus();$('copy').select()}
 $('addlayer').onclick=addText;$('imgtab').onclick=()=>{state.selected='image';sync();saveSoon()};$('typetab').onclick=()=>{const t=state.text.find(l=>l.id===lastText)||state.text[0];if(!t)return addText();state.selected=t.id;sync();saveSoon()};
 $('format').innerHTML=Object.entries(formats).map(([id,n])=>'<option value="'+id+'">'+n+'</option>').join('');
@@ -239,11 +297,12 @@ $('fontfile').onchange=async e=>{const file=e.target.files[0];e.target.value='';
  await addFace(name,await fileData(file));let stored=true;if(db)try{await dbPut('fonts',Array.from(userFonts))}catch{stored=false}change(()=>{if(selected())selected().font=name});toast(stored?'Font added to your typefaces':'Font loaded for this session. Device storage is full.')}catch{toast('Could not read that font. Choose a TTF, OTF, WOFF or WOFF2 file.')}};
 const canvas=$('canvas');
 canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
- if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);return x>=b.x-4&&x<=b.x+b.width+4&&y>=b.y-4&&y<=b.y+b.height+4});
+ if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);let px=x,py=y;if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2,r=-t.rotation*Math.PI/180,dx=x-cx,dy=y-cy;px=cx+dx*Math.cos(r)-dy*Math.sin(r);py=cy+dx*Math.sin(r)+dy*Math.cos(r)}const p=Math.max(4,t.bg?b.size*(t.bgPad??30)/100:0);return px>=b.x-p&&px<=b.x+b.width+p&&py>=b.y-p&&py<=b.y+b.height+p});
  if(!hit&&!photoFrame(tgt,canvas.width,canvas.height))return;
  state.selected=hit?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:hit?.x??state.photoStyle.panX,oy:hit?.y??state.photoStyle.panY,img,rect};sync()};
 canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),target=targets[state.format];
  if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
+canvas.ondblclick=()=>{if(selected()&&$('copy')){$('copy').focus();$('copy').select()}};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
 document.querySelectorAll('.close').forEach(b=>b.onclick=()=>b.closest('dialog').close());
@@ -350,7 +409,7 @@ $('download').onclick=async()=>{if(exportBusy||!state.outputs.length)return;expo
  try{await preloadText();const files=[],base=state.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g,'-').trim().slice(0,70)||'Artwork';for(const [i,id] of state.outputs.entries()){const t=targets[id];$('exportcount').textContent='Rendering '+(i+1)+' of '+state.outputs.length+'…';await new Promise(r=>setTimeout(r,20));const c=document.createElement('canvas');paint(c,img,t,t.w,t.h);let quality=.95,blob=await asBlob(c,'image/'+(t.ext==='jpg'?'jpeg':'png'),quality);
  while(t.limit&&blob.size>t.limit&&quality>.35){quality-=.1;blob=await asBlob(c,'image/jpeg',quality)}c.width=c.height=1;if(t.limit&&blob.size>t.limit)throw new Error('The banner exceeds the platform size limit. Try a simpler image.');files.push({blob,name:base+'-'+id+'-'+t.w+'x'+t.h+'.'+t.ext})}
  const single=files.length===1,blob=single?files[0].blob:await makeZip(files),a=$('downloadlink');preparedUrl=URL.createObjectURL(blob);a.href=preparedUrl;a.download=single?files[0].name:base+'-artwork.zip';a.hidden=false;a.textContent='Save '+a.download;a.click();$('exportcount').textContent='Export ready'}catch(e){$('exportcount').textContent=e.message||'Export failed. Please try again.'}finally{exportBusy=false;dlg.querySelectorAll('button,input').forEach(el=>el.disabled=false)}};
-document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
+document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='d'&&selected()){e.preventDefault();duplicateText()}else if(!cmd&&(k==='delete'||k==='backspace')&&selected()){e.preventDefault();removeText()}else if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selected();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
 function readProjectOnOpen() {
  const navigation = performance.getEntriesByType('navigation')[0];
  const reloaded = navigation?.type === 'reload' || performance.navigation?.type === 1;
