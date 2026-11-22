@@ -83,10 +83,20 @@ function area(target, layout) {
 }
 const textCase=t=>{const v=t.value||'';return t.textCase==='upper'?v.toUpperCase():t.textCase==='lower'?v.toLowerCase():t.textCase==='title'?v.toLowerCase().replace(/(^|[\s\-(])(\p{L})/gu,(m,a,b)=>a+b.toUpperCase()):v};
 const leadOf=t=>t.leading??1.12;
-function layoutText(ctx,t,target,w,h,layout){const a=area(target,layout),aw=a.w*w,ah=a.h*h;const lines=textCase(t).split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
+const padOf=t=>t.bgPad??(t.bg?30:8);
+function wrapLines(lines,measure,maxW){const out=[];for(const line of lines){if(!line){out.push('');continue}let cur='';for(const word of line.split(' ')){const test=cur?cur+' '+word:word;if(!cur||measure(test)<=maxW)cur=test;else{out.push(cur);cur=word}}out.push(cur)}return out}
+// Free text sits anywhere on the full canvas: no safe-area clamp, no auto-shrink, optional wrapping box.
+function layoutFree(ctx,t,w,h){const size=t.size/100*Math.min(w,h),tr=t.tracking||0;ctx.font=cssFont(t,size);
+ const measure=line=>ctx.measureText(line).width+Math.max(0,Array.from(line).length-1)*size*tr;
+ let lines=textCase(t).split('\n');if(t.boxW)lines=wrapLines(lines,measure,t.boxW*w);
+ const width=t.boxW?t.boxW*w:Math.max(1,...lines.map(measure)),height=size*leadOf(t)*lines.length;
+ return {lines,size,x:t.x*w-width/2,y:t.y*h-height/2,width,height,measure}}
+function makeFree(t){if(t.free)return;const cv=$('canvas'),b=layoutText(cv.getContext('2d'),t,targets[state.format],cv.width,cv.height);
+ t.x=(b.x+b.width/2)/cv.width;t.y=(b.y+b.height/2)/cv.height;t.size=Math.round(b.size/Math.min(cv.width,cv.height)*1000)/10;t.free=true}
+function layoutText(ctx,t,target,w,h,layout){if(t.free)return layoutFree(ctx,t,w,h);const a=area(target,layout),aw=a.w*w,ah=a.h*h;const lines=textCase(t).split('\n');let size=t.size/100*(target.safe?Math.min(aw,ah*2.3):Math.min(w,h));ctx.font=cssFont(t,size);
  const measure=line=>ctx.measureText(line).width+Math.max(0,Array.from(line).length-1)*size*t.tracking;
  let width=Math.max(1,...lines.map(measure)),height=size*leadOf(t)*lines.length;
- const strokePad=Math.max(t.outline?size*(t.outlineWidth??4)/100:0,t.bg?size*(t.bgPad??30)/100:0);
+ const strokePad=Math.max(t.outline?size*(t.outlineWidth??4)/100:0,t.bg?size*padOf(t)/100:0);
  const scale=Math.min(1,aw/(width+2*strokePad),ah/(height+2*strokePad));size*=scale;ctx.font=cssFont(t,size);width=Math.max(1,...lines.map(measure));height=size*leadOf(t)*lines.length;
  const pad=strokePad*scale;
  const x=clamp(a.x*w+t.x*aw-width/2,a.x*w+pad,(a.x+a.w)*w-width-pad),y=clamp(a.y*h+t.y*ah-height/2,a.y*h+pad,(a.y+a.h)*h-height-pad);
@@ -103,7 +113,7 @@ function shadowSettings(layer) {
 function drawType(ctx,t,target,w,h,layout){const b=layoutText(ctx,t,target,w,h,layout);ctx.save();
  if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2;ctx.translate(cx,cy);ctx.rotate(t.rotation*Math.PI/180);ctx.translate(-cx,-cy)}
  ctx.globalAlpha=(t.opacity??100)/100;
- if(t.bg){const pad=b.size*(t.bgPad??30)/100,bw=b.width+pad*2,bh=b.height+pad*2,r=Math.min(bw,bh)/2*(t.bgRadius??20)/100;
+ if(t.bg){const pad=b.size*padOf(t)/100,bw=b.width+pad*2,bh=b.height+pad*2,r=Math.min(bw,bh)/2*(t.bgRadius??20)/100;
    ctx.fillStyle=t.bgColor||'#151513';ctx.beginPath();ctx.roundRect(b.x-pad,b.y-pad,bw,bh,r);ctx.fill()}
  ctx.fillStyle=t.color;ctx.textBaseline='middle';
  const shadow = shadowSettings(t);
@@ -212,13 +222,13 @@ const textPresets=[
  {name:'Tech',font:'Space Grotesk',bold:true,italic:false,textCase:'lower',tracking:-.02,leading:1.05,color:'#ff895e',outline:false,bg:false,shadow:'Off',underline:false}
 ];
 function typographyControls(t){
- return '<div class="group"><h3>Spacing &amp; case</h3>'+slider('txtracking','Letter spacing',-10,100,Math.round((t.tracking||0)*100),'%')+slider('txleading','Line spacing',70,220,Math.round(leadOf(t)*100),'%')
+ return '<div class="group"><h3>Spacing &amp; case</h3>'+slider('txtracking','Letter spacing',-10,100,Math.round((t.tracking||0)*100),'%')+slider('txleading','Line spacing (leading)',60,300,Math.round(leadOf(t)*100),'%')+slider('txpad','Box padding',0,100,Math.round(padOf(t)),'%')+(t.boxW?'<div class="row fieldrow"><button class="softbtn" id="autowidth">Auto width (no wrapping)</button></div>':'')
   +'<div class="fieldrow"><div class="labelrow">Letter case</div>'+segment([['none','Original case','','Aa'],['upper','Uppercase','','AA'],['lower','Lowercase','','aa'],['title','Title case','','Ab']],t.textCase||'none','textCase')+'</div>'
   +'<div class="row fieldrow"><button class="softbtn" id="underline" aria-pressed="'+!!t.underline+'"><u>U</u> Underline</button><button class="softbtn" id="strike" aria-pressed="'+!!t.strike+'"><s>S</s> Strike</button></div></div>'
   +'<div class="group"><h3>Transform</h3>'+slider('txrotation','Rotation',-180,180,Math.round(t.rotation||0),'°')+slider('txopacity','Opacity',0,100,t.opacity??100,'%')+'</div>';
 }
 function highlightControls(t){
- return '<div class="group"><label class="mask-check"><input id="bgbox" type="checkbox" '+(t.bg?'checked':'')+'>Highlight box</label>'+(t.bg?'<label class="fieldrow stack field">Box colour<input class="paint-chip" id="bgcolor" type="color" value="'+(t.bgColor||'#151513')+'"></label>'+slider('bgpad','Padding',0,100,t.bgPad??30,'%')+slider('bgradius','Corner radius',0,100,t.bgRadius??20,'%'):'')+'</div>';
+ return '<div class="group"><label class="mask-check"><input id="bgbox" type="checkbox" '+(t.bg?'checked':'')+'>Highlight box</label>'+(t.bg?'<label class="fieldrow stack field">Box colour<input class="paint-chip" id="bgcolor" type="color" value="'+(t.bgColor||'#151513')+'"></label>'+slider('bgradius','Corner radius',0,100,t.bgRadius??20,'%'):'')+'</div>';
 }
 function layerActions(t){
  const arr=layerArray(t),i=arr.indexOf(t);
@@ -233,7 +243,7 @@ function overlayTools(o){const m=media.get(o.media);
   +'<div class="row fieldrow"><button class="softbtn" id="ovflip" aria-pressed="'+!!o.mirror+'">'+icon('flip')+'Flip</button><button class="softbtn" id="ovcenter">Centre</button></div></div>'
   +layerActions(o)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove image layer</button></div>';
 }
-function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+presetControls()+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" maxlength="600">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="80" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+typographyControls(t)+highlightControls(t)+outlineControls(t)+shadowControls(t)+layerActions(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
+function textTools(t){const names=fonts.concat(Array.from(userFonts.keys()));return (targets[state.format].noText?'<p class="note">Spotify artist headers export with the image only.</p>':'')+presetControls()+'<div class="group"><label class="field" for="copy">Text content</label><textarea id="copy" rows="4" maxlength="600" placeholder="Type text. Press Enter for a new line.">'+esc(t.value)+'</textarea></div><div class="group"><label class="field" for="font">Typeface</label><select id="font">'+names.map(n=>'<option '+(n===t.font?'selected':'')+'>'+esc(n)+'</option>').join('')+'</select><div class="row fieldrow"><button class="softbtn" id="bold" aria-pressed="'+t.bold+'"><b>B</b> Bold</button><button class="softbtn" id="italic" aria-pressed="'+t.italic+'"><i>I</i> Italic</button></div><button id="uploadfont" class="softbtn full fieldrow">'+icon('upload')+'Upload font</button></div><div class="group"><div class="twofields"><label class="field">Size (%)<input type="number" id="size" min="1" max="200" step="0.1" value="'+t.size+'"></label><label class="field">Colour<span class="colorfield"><input type="color" id="color" value="'+t.color+'"><span id="hex">'+esc(t.color)+'</span></span></label></div><div class="fieldrow"><div class="labelrow">Line alignment</div>'+segment([['left','Align left','left'],['center','Align centre','center'],['right','Align right','right']],t.align,'align')+'</div></div>'+typographyControls(t)+highlightControls(t)+outlineControls(t)+shadowControls(t)+layerActions(t)+'<div class="group"><button id="removetext" class="softbtn full">'+icon('trash')+'Remove text layer</button></div>'}
 function continuous(el,apply){let before=null;el.addEventListener('input',()=>{before??=snap();apply();redraw();saveSoon()});el.addEventListener('change',()=>{checkpoint(before);before=null});}
 function bindRange(id, suffix, setValue) {
  const el = $(id);
@@ -276,13 +286,13 @@ function controls(){const t=selected(),s=state.photoStyle;$('imgtab').classList.
    $('outlinejoin').onchange=e=>change(()=>t.outlineJoin=e.target.value);
    continuous($('outlinecolor'),()=>t.outlineColor=$('outlinecolor').value);
  }
- bindRange('txtracking','%',v=>t.tracking=v/100);bindRange('txleading','%',v=>t.leading=v/100);bindRange('txrotation','°',v=>t.rotation=v);bindRange('txopacity','%',v=>t.opacity=v);
+ bindRange('txtracking','%',v=>t.tracking=v/100);bindRange('txleading','%',v=>t.leading=v/100);bindRange('txpad','%',v=>t.bgPad=v);if($('autowidth'))$('autowidth').onclick=()=>change(()=>{makeFree(t);delete t.boxW});bindRange('txrotation','°',v=>t.rotation=v);bindRange('txopacity','%',v=>t.opacity=v);
  $('underline').onclick=()=>change(()=>t.underline=!t.underline);$('strike').onclick=()=>change(()=>t.strike=!t.strike);
  $('bgbox').onchange=e=>change(()=>t.bg=e.target.checked);
- if(t.bg){continuous($('bgcolor'),()=>t.bgColor=$('bgcolor').value);bindRange('bgpad','%',v=>t.bgPad=v);bindRange('bgradius','%',v=>t.bgRadius=v)}
+ if(t.bg){continuous($('bgcolor'),()=>t.bgColor=$('bgcolor').value);bindRange('bgradius','%',v=>t.bgRadius=v)}
  $('dupe').onclick=()=>duplicateText();$('forward').onclick=()=>moveText(-1);$('backward').onclick=()=>moveText(1);
  $('controls').querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>change(()=>{const {name,...p}=textPresets[b.dataset.preset];for(const k of ['outline','bg','underline','strike'])t[k]=false;delete t.shadowAdjustments;Object.assign(t,p)}));
- lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=removeText
+ lastText=t.id;continuous($('copy'),()=>{t.value=$('copy').value;layerList()});$('font').onchange=e=>change(()=>t.font=e.target.value);$('size').onchange=e=>change(()=>t.size=clamp(Number(e.target.value)||1,1,t.free?200:80));continuous($('color'),()=>{t.color=$('color').value;$('hex').textContent=t.color});$('bold').onclick=()=>change(()=>t.bold=!t.bold);$('italic').onclick=()=>change(()=>t.italic=!t.italic);$('shadow').onchange=e=>change(()=>t.shadow=e.target.value);$('uploadfont').onclick=()=>$('fontfile').click();$('removetext').onclick=removeText
 }
 function sync(){const target=targets[state.format];$('project').value=state.name;$('format').value=state.format;$('artwrap').style.setProperty('--aspect',target.w/target.h);$('dims').textContent=target.w+' × '+target.h+' px';$('guides').hidden=!guides;const a=area(target);$('guides').style.inset=[a.y,1-a.x-a.w,1-a.y-a.h,a.x].map(v=>Math.max(0,v)*100+'%').join(' ');$('guidebtn').setAttribute('aria-pressed',guides);$('dragtip').textContent=selected()?'Drag text to reposition':selectedOverlay()?'Drag image to reposition':'Drag artwork to reposition';gallery();layerList();controls();historyUI();redraw()}
 function duplicateText(){const t=selLayer();if(!t)return;change(()=>{const arr=layerArray(t),c=structuredClone(t);c.id=crypto.randomUUID();if(arr===state.text)c.role='text';c.x=clamp(t.x+.03,0,1);c.y=clamp(t.y+.03,0,1);arr.splice(arr.indexOf(t),0,c);state.selected=c.id})}
@@ -294,17 +304,26 @@ function updateSelection(){const box=$('selbox'),t=selected(),o=selectedOverlay(
  if(tgt.noText||!cv.width||!(t||o)){box.hidden=true;return}
  let L,T,W,H,rot;
  if(t){if(!t.visible||!t.value){box.hidden=true;return}
-   const b=layoutText(cv.getContext('2d'),t,tgt,cv.width,cv.height),p=t.bg?b.size*(t.bgPad??30)/100:0;L=b.x-p;T=b.y-p;W=b.width+2*p;H=b.height+2*p;rot=t.rotation||0}
+   const b=layoutText(cv.getContext('2d'),t,tgt,cv.width,cv.height),p=b.size*padOf(t)/100;L=b.x-p;T=b.y-p;W=b.width+2*p;H=b.height+2*p;rot=t.rotation||0}
  else{const sz=o.visible&&overlaySize(o,cv.width);if(!sz){box.hidden=true;return}L=o.x*cv.width-sz.dw/2;T=o.y*cv.height-sz.dh/2;W=sz.dw;H=sz.dh;rot=o.rotation||0}
- const k=cv.clientWidth/cv.width;box.hidden=false;Object.assign(box.style,{left:L*k+'px',top:T*k+'px',width:W*k+'px',height:H*k+'px',transform:'rotate('+rot+'deg)'})}
+ const k=cv.clientWidth/cv.width;box.classList.toggle('imgsel',!!o);box.hidden=false;Object.assign(box.style,{left:L*k+'px',top:T*k+'px',width:W*k+'px',height:H*k+'px',transform:'rotate('+rot+'deg)'})}
 let handleOp=null;
 $('selbox').addEventListener('pointerdown',e=>{const h=e.target.closest('[data-h]'),t=selLayer();if(!h||!t||e.button!==0)return;e.preventDefault();e.stopPropagation();
+ const before=snap(),isText=!!selected(),cv=$('canvas');if(isText)makeFree(t);
  const r=$('selbox').getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;h.setPointerCapture(e.pointerId);
- handleOp={mode:h.dataset.h,id:e.pointerId,before:snap(),cx,cy,d0:Math.max(1,Math.hypot(e.clientX-cx,e.clientY-cy)),size:t.size??t.w}});
-$('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const t=selLayer();if(!t)return;const isText=!!selected();const dx=e.clientX-handleOp.cx,dy=e.clientY-handleOp.cy;
- if(handleOp.mode==='rotate'){let a=Math.atan2(dy,dx)*180/Math.PI+90;a=((a+540)%360)-180;const near=Math.round(a/45)*45;a=e.shiftKey?Math.round(a/15)*15:Math.abs(a-near)<3?near:a;t.rotation=Math.round(a);const rid=isText?'txrotation':'ovrotation';if($(rid)){$(rid).value=t.rotation;$(rid+'val').textContent=t.rotation+'°';$(rid).style.setProperty('--fill',(t.rotation+180)/360*100+'%')}}
- else if(isText){t.size=clamp(Math.round(handleOp.size*Math.hypot(dx,dy)/handleOp.d0*10)/10,1,80);if($('size'))$('size').value=t.size}
- else{t.w=clamp(handleOp.size*Math.hypot(dx,dy)/handleOp.d0,.02,2)}
+ const op={mode:h.dataset.h,side:Number(h.dataset.s||1),id:e.pointerId,before,cx,cy,sx:e.clientX,sy:e.clientY,d0:Math.max(1,Math.hypot(e.clientX-cx,e.clientY-cy)),size:t.size??t.w};
+ if(isText){const b=layoutText(cv.getContext('2d'),t,targets[state.format],cv.width,cv.height);Object.assign(op,{w0:b.width,cx0:t.x*cv.width,cy0:t.y*cv.height,top0:b.y,lead0:leadOf(t),lines:b.lines.length,fs:b.size})}
+ handleOp=op});
+$('selbox').addEventListener('pointermove',e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const t=selLayer();if(!t)return;const isText=!!selected(),op=handleOp,cv=$('canvas'),k=cv.clientWidth/cv.width;
+ const dx=e.clientX-op.cx,dy=e.clientY-op.cy,ddx=e.clientX-op.sx,ddy=e.clientY-op.sy,rad=(t.rotation||0)*Math.PI/180;
+ if(op.mode==='rotate'){let a=Math.atan2(dy,dx)*180/Math.PI+90;a=((a+540)%360)-180;const near=Math.round(a/45)*45;a=e.shiftKey?Math.round(a/15)*15:Math.abs(a-near)<3?near:a;t.rotation=Math.round(a);const rid=isText?'txrotation':'ovrotation';if($(rid)){$(rid).value=t.rotation;$(rid+'val').textContent=t.rotation+'°';$(rid).style.setProperty('--fill',(t.rotation+180)/360*100+'%')}}
+ else if(op.mode==='width'&&isText){const local=ddx*Math.cos(rad)+ddy*Math.sin(rad),nw=clamp(op.w0+op.side*local/k,op.fs,cv.width*2),shift=op.side*(nw-op.w0)/2;
+   t.boxW=nw/cv.width;t.x=(op.cx0+shift*Math.cos(rad))/cv.width;t.y=(op.cy0+shift*Math.sin(rad))/cv.height;
+   if(!rad){const b=layoutText(cv.getContext('2d'),t,targets[state.format],cv.width,cv.height);t.y=(op.top0+b.height/2)/cv.height}}
+ else if(op.mode==='lead'&&isText){const local=-ddx*Math.sin(rad)+ddy*Math.cos(rad);t.leading=Math.round(clamp(op.lead0+op.side*2*local/k/(op.lines*op.fs),.6,3)*100)/100;
+   if($('txleading')){$('txleading').value=Math.round(t.leading*100);$('txleadingval').textContent=Math.round(t.leading*100)+'%';$('txleading').style.setProperty('--fill',($('txleading').value-$('txleading').min)/($('txleading').max-$('txleading').min)*100+'%')}}
+ else if(isText){t.size=clamp(Math.round(op.size*Math.hypot(dx,dy)/op.d0*10)/10,1,200);if($('size'))$('size').value=t.size}
+ else if(!isText&&op.mode==='resize'){t.w=clamp(op.size*Math.hypot(dx,dy)/op.d0,.02,2)}
  redraw()});
 const endHandle=e=>{if(!handleOp||handleOp.id!==e.pointerId)return;const before=handleOp.before;handleOp=null;checkpoint(before);sync()};
 $('selbox').addEventListener('pointerup',endHandle);$('selbox').addEventListener('pointercancel',endHandle);
@@ -325,13 +344,13 @@ $('fontfile').onchange=async e=>{const file=e.target.files[0];e.target.value='';
  await addFace(name,await fileData(file));let stored=true;if(db)try{await dbPut('fonts',Array.from(userFonts))}catch{stored=false}change(()=>{if(selected())selected().font=name});toast(stored?'Font added to your typefaces':'Font loaded for this session. Device storage is full.')}catch{toast('Could not read that font. Choose a TTF, OTF, WOFF or WOFF2 file.')}};
 const canvas=$('canvas');
 canvas.onpointerdown=async e=>{if(e.button!==0)return;canvas.focus();canvas.setPointerCapture(e.pointerId);const img=await loadImg(state.photo);if(!canvas.hasPointerCapture(e.pointerId))return;const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*canvas.width,y=(e.clientY-rect.top)/rect.height*canvas.height,tgt=targets[state.format],ctx=canvas.getContext('2d');let hit;
- if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);let px=x,py=y;if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2,r=-t.rotation*Math.PI/180,dx=x-cx,dy=y-cy;px=cx+dx*Math.cos(r)-dy*Math.sin(r);py=cy+dx*Math.sin(r)+dy*Math.cos(r)}const p=Math.max(4,t.bg?b.size*(t.bgPad??30)/100:0);return px>=b.x-p&&px<=b.x+b.width+p&&py>=b.y-p&&py<=b.y+b.height+p});
+ if(!tgt.noText)hit=state.text.find(t=>{if(!t.visible||!t.value)return false;const b=layoutText(ctx,t,tgt,canvas.width,canvas.height);let px=x,py=y;if(t.rotation){const cx=b.x+b.width/2,cy=b.y+b.height/2,r=-t.rotation*Math.PI/180,dx=x-cx,dy=y-cy;px=cx+dx*Math.cos(r)-dy*Math.sin(r);py=cy+dx*Math.sin(r)+dy*Math.cos(r)}const p=Math.max(4,b.size*padOf(t)/100);return px>=b.x-p&&px<=b.x+b.width+p&&py>=b.y-p&&py<=b.y+b.height+p});
  let ov;if(!hit&&!tgt.noText)ov=state.images.find(o=>o.visible&&overlayHit(o,x,y,canvas));
  const lay=hit||ov;
  if(!lay&&!photoFrame(tgt,canvas.width,canvas.height))return;
  state.selected=lay?.id||'image';drag={id:e.pointerId,before:snap(),sx:e.clientX,sy:e.clientY,ox:lay?.x??state.photoStyle.panX,oy:lay?.y??state.photoStyle.panY,img,rect};sync()};
 canvas.onpointermove=e=>{if(!drag||drag.id!==e.pointerId)return;const {sx,sy,ox,oy,img,rect}=drag,dx=e.clientX-sx,dy=e.clientY-sy,t=selected(),ov=selectedOverlay(),target=targets[state.format];
- if(t){const a=area(target);t.x=clamp(ox+dx/(rect.width*a.w),0,1);t.y=clamp(oy+dy/(rect.height*a.h),0,1)}else if(ov){ov.x=clamp(ox+dx/rect.width,0,1);ov.y=clamp(oy+dy/rect.height,0,1)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
+ if(t){if(!t.free){makeFree(t);drag.ox=t.x;drag.oy=t.y}t.x=clamp(drag.ox+dx/rect.width,-.25,1.25);t.y=clamp(drag.oy+dy/rect.height,-.25,1.25)}else if(ov){ov.x=clamp(ox+dx/rect.width,-.25,1.25);ov.y=clamp(oy+dy/rect.height,-.25,1.25)}else{const s=state.photoStyle,frame=photoFrame(target,rect.width,rect.height);if(!frame)return;const g=geometry(img,s,frame.w,frame.h);s.panX=g.rangeX>.1?clamp(ox+dx/g.rangeX,-1,1):0;s.panY=g.rangeY>.1?clamp(oy+dy/g.rangeY,-1,1):0}redraw()};
 canvas.ondblclick=()=>{if(selected()&&$('copy')){$('copy').focus();$('copy').select()}};
 canvas.onlostpointercapture=()=>{if(drag){checkpoint(drag.before);drag=null;saveSoon()}};
 new ResizeObserver(()=>redraw()).observe($('artwrap'));
@@ -384,6 +403,10 @@ $('openlayouts').onclick = async () => {
    layoutImage = await loadImg(state.photo);
    await preloadText();
    layoutDraft = structuredClone(state.text);
+   for (const l of layoutDraft) if (l.free && (l.role==='title'||l.role==='artist')) {
+     Object.assign(l, l.role==='title' ? {x:.5,y:.165,size:20.1} : {x:.5,y:.924,size:2.6});
+     delete l.free; delete l.boxW;
+   }
    for (const role of ['title','artist']) $('release-'+role).value=layoutDraft.find(t=>t.role===role)?.value||'';
    const current = state.layout || 'full';
    for (const input of cards.querySelectorAll('input')) input.checked=input.value===current;
@@ -439,7 +462,7 @@ $('download').onclick=async()=>{if(exportBusy||!state.outputs.length)return;expo
  try{await preloadText();const files=[],base=state.name.replace(/[<>:"/\\|?*\u0000-\u001f]+/g,'-').trim().slice(0,70)||'Artwork';for(const [i,id] of state.outputs.entries()){const t=targets[id];$('exportcount').textContent='Rendering '+(i+1)+' of '+state.outputs.length+'…';await new Promise(r=>setTimeout(r,20));const c=document.createElement('canvas');paint(c,img,t,t.w,t.h);let quality=.95,blob=await asBlob(c,'image/'+(t.ext==='jpg'?'jpeg':'png'),quality);
  while(t.limit&&blob.size>t.limit&&quality>.35){quality-=.1;blob=await asBlob(c,'image/jpeg',quality)}c.width=c.height=1;if(t.limit&&blob.size>t.limit)throw new Error('The banner exceeds the platform size limit. Try a simpler image.');files.push({blob,name:base+'-'+id+'-'+t.w+'x'+t.h+'.'+t.ext})}
  const single=files.length===1,blob=single?files[0].blob:await makeZip(files),a=$('downloadlink');preparedUrl=URL.createObjectURL(blob);a.href=preparedUrl;a.download=single?files[0].name:base+'-artwork.zip';a.hidden=false;a.textContent='Save '+a.download;a.click();$('exportcount').textContent='Export ready'}catch(e){$('exportcount').textContent=e.message||'Export failed. Please try again.'}finally{exportBusy=false;dlg.querySelectorAll('button,input').forEach(el=>el.disabled=false)}};
-document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='d'&&selLayer()){e.preventDefault();duplicateText()}else if(!cmd&&(k==='delete'||k==='backspace')&&selLayer()){e.preventDefault();removeText()}else if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selLayer();if(t){t.x=clamp(t.x+dx,0,1);t.y=clamp(t.y+dy,0,1)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
+document.addEventListener('keydown',e=>{if(document.querySelector('dialog[open]'))return;const cmd=e.metaKey||e.ctrlKey,k=e.key.toLowerCase(),editing=/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);if(cmd&&k==='e'){e.preventDefault();showExport();return}if(editing)return;if(cmd&&k==='d'&&selLayer()){e.preventDefault();duplicateText()}else if(!cmd&&(k==='delete'||k==='backspace')&&selLayer()){e.preventDefault();removeText()}else if(cmd&&k==='z'){e.preventDefault();e.shiftKey?$('redo').click():$('undo').click()}else if(!cmd&&k==='g')$('guidebtn').click();else if(k==='?')openHelp();else if(k.startsWith('arrow')){e.preventDefault();const amount=e.shiftKey?.03:.003,dx=k==='arrowright'?amount:k==='arrowleft'?-amount:0,dy=k==='arrowdown'?amount:k==='arrowup'?-amount:0;change(()=>{const t=selLayer();if(t){if(state.text.includes(t))makeFree(t);t.x=clamp(t.x+dx,-.25,1.25);t.y=clamp(t.y+dy,-.25,1.25)}else{state.photoStyle.panX=clamp(state.photoStyle.panX+dx*4,-1,1);state.photoStyle.panY=clamp(state.photoStyle.panY+dy*4,-1,1)}})}});
 function readProjectOnOpen() {
  const navigation = performance.getEntriesByType('navigation')[0];
  const reloaded = navigation?.type === 'reload' || performance.navigation?.type === 1;

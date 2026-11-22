@@ -82,3 +82,7 @@ dialog{width:min(470px,calc(100% - 28px));max-height:90dvh;overflow:auto;margin:
 .tilewrap:hover .tile-add,.tile-add:focus-visible{opacity:1}
 @media(hover:none){.tile-add{opacity:1}}
 .tilewrap>.tile{display:block;width:100%}
+
+.sel-h.side-e{right:-7px;top:calc(50% - 6px);cursor:ew-resize}.sel-h.side-w{left:-7px;top:calc(50% - 6px);cursor:ew-resize}
+.sel-h.side-n{top:-7px;left:calc(50% - 6px);cursor:ns-resize}.sel-h.side-s{bottom:-7px;left:calc(50% - 6px);cursor:ns-resize}
+.imgsel .sel-s{display:none}
